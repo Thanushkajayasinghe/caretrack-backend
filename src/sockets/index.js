@@ -1,6 +1,7 @@
 import { Server } from 'socket.io';
 import { verifyAccessToken, hashDeviceToken, hashFingerprint } from '../services/tokenService.js';
 import { db } from '../config/db.js';
+import { cacheLocation } from '../services/locationCache.js';
 
 let io = null;
 
@@ -118,6 +119,9 @@ export function initSocket(httpServer) {
             recorded_at: new Date(data.recordedAt),
           }).onConflict(['child_id', 'recorded_at']).ignore();
         } catch (_e) { /* ignore duplicate */ }
+
+        // Cache in Redis (latest point + active trail) with safe error handling
+        cacheLocation(socket.childId, data);
 
         // Also update child_devices with latest battery
         if (data.batteryLevel != null || data.isCharging != null) {

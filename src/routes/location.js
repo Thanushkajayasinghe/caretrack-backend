@@ -4,6 +4,7 @@ import { db } from '../config/db.js';
 import { requireDeviceAuth, requireParentAuth } from '../middleware/auth.js';
 import { getIO } from '../sockets/index.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { cacheLocation, getCachedLatestLocation, getCachedTrail } from '../services/locationCache.js';
 
 const router = express.Router();
 
@@ -87,6 +88,9 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
       timestamp: new Date().toISOString(),
     });
 
+    // Cache latest point and active trail into Redis (safe error handling)
+    cacheLocation(child_id, latest);
+
     // Update child_devices last_seen & battery
     const deviceUpdate = { last_seen: new Date() };
     if (latest.batteryLevel != null) {
@@ -155,7 +159,7 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
 });
 
 // ── GET /api/location/live/:childId ──────────────────────────────────────────
-// Parent: get last known location for a child
+// Parent: get last known location for a child (Redis cache-aside with Postgres fallback)
 router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
   try {
     const child = await db('children')
@@ -163,6 +167,21 @@ router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
       .first();
     if (!child) throw new AppError('Child not found', 404);
 
+    // 1. Try Redis cache first (Sub-20ms instant RAM response)
+    const cachedLoc = await getCachedLatestLocation(req.params.childId);
+    if (cachedLoc) {
+      return res.json({
+        location: cachedLoc,
+        device: {
+          battery_level: cachedLoc.battery_level,
+          is_charging: cachedLoc.is_charging,
+          last_seen: cachedLoc.recorded_at,
+        },
+        cached: true,
+      });
+    }
+
+    // 2. Cache miss or Redis unavailable: query PostgreSQL
     const result = await db('locations')
       .where({ child_id: req.params.childId })
       .orderBy('recorded_at', 'desc')
@@ -193,6 +212,11 @@ router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
       }
     }
 
+    // Backfill Redis cache asynchronously
+    if (result) {
+      cacheLocation(req.params.childId, result);
+    }
+
     res.json({
       location: result || null,
       device: activeDevice ? {
@@ -200,7 +224,50 @@ router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
         is_charging: activeDevice.is_charging,
         last_seen: activeDevice.last_seen,
       } : null,
+      cached: false,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/location/trail/:childId ──────────────────────────────────────────
+// Parent: get recent breadcrumb trail (Redis cache-aside with Postgres fallback)
+router.get('/trail/:childId', requireParentAuth, async (req, res, next) => {
+  try {
+    const child = await db('children')
+      .where({ id: req.params.childId, parent_id: req.parent.id })
+      .first();
+    if (!child) throw new AppError('Child not found', 404);
+
+    // 1. Try Redis cached trail first (Last 100 points)
+    const cachedTrail = await getCachedTrail(req.params.childId, 100);
+    if (cachedTrail && cachedTrail.length > 0) {
+      return res.json({ points: cachedTrail, cached: true });
+    }
+
+    // 2. Cache miss or Redis unavailable: query PostgreSQL (last 24 hours)
+    const points = await db('locations')
+      .where({ child_id: req.params.childId })
+      .where('recorded_at', '>=', new Date(Date.now() - 24 * 60 * 60 * 1000))
+      .orderBy('recorded_at', 'desc')
+      .limit(100)
+      .select(
+        'id',
+        db.raw('ST_Y(location::geometry) as lat'),
+        db.raw('ST_X(location::geometry) as lng'),
+        'accuracy', 'speed', 'heading',
+        'battery_level', 'is_charging',
+        'recorded_at',
+      );
+
+    const chronological = (points || []).reverse();
+    // Backfill Redis cache asynchronously
+    for (const pt of chronological) {
+      cacheLocation(req.params.childId, pt);
+    }
+
+    res.json({ points: chronological, cached: false });
   } catch (err) {
     next(err);
   }
@@ -218,6 +285,15 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
       .where({ id: childId, parent_id: req.parent.id })
       .first();
     if (!child) throw new AppError('Child not found', 404);
+
+    // Fast-path: If querying recent live trail (limit <= 120 and up to current time)
+    const isRecentQuery = Number(limit) <= 120 && (!to || new Date(to) >= new Date(Date.now() - 60000));
+    if (isRecentQuery) {
+      const cachedTrail = await getCachedTrail(childId, Number(limit));
+      if (cachedTrail && cachedTrail.length > 0) {
+        return res.json({ points: cachedTrail, count: cachedTrail.length, cached: true });
+      }
+    }
 
     let query = db('locations')
       .where({ child_id: childId })

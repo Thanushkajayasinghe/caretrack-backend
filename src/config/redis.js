@@ -17,6 +17,29 @@ class MemoryStore {
     this.store.delete(key);
     return 1;
   }
+  async lpush(key, value) {
+    let list = this.store.get(key);
+    if (!Array.isArray(list)) list = [];
+    list.unshift(value);
+    this.store.set(key, list);
+    return list.length;
+  }
+  async ltrim(key, start, stop) {
+    let list = this.store.get(key);
+    if (Array.isArray(list)) {
+      this.store.set(key, list.slice(start, stop + 1));
+    }
+    return 'OK';
+  }
+  async lrange(key, start, stop) {
+    let list = this.store.get(key);
+    if (!Array.isArray(list)) return [];
+    return list.slice(start, stop === -1 ? undefined : stop + 1);
+  }
+  async expire(key, ttlSeconds) {
+    setTimeout(() => this.store.delete(key), ttlSeconds * 1000);
+    return 1;
+  }
 }
 
 let redisClient = null;
