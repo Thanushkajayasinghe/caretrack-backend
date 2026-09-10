@@ -1,0 +1,308 @@
+import express from 'express';
+import { z } from 'zod';
+import { db } from '../config/db.js';
+import { requireDeviceAuth, requireParentAuth } from '../middleware/auth.js';
+import { getIO } from '../sockets/index.js';
+import { AppError } from '../middleware/errorHandler.js';
+
+const router = express.Router();
+
+const locationPointSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  accuracy: z.number().nullable().optional(),
+  speed: z.number().nullable().optional(),         // m/s
+  heading: z.number().nullable().optional(),       // degrees
+  altitude: z.number().nullable().optional(),
+  batteryLevel: z.number().int().min(0).max(100).nullable().optional(),
+  isCharging: z.boolean().nullable().optional(),
+  recordedAt: z.string(),    // ISO string from device
+});
+
+const batchSchema = z.object({
+  points: z.array(locationPointSchema).min(1).max(500),
+});
+
+// ── POST /api/location/batch ──────────────────────────────────────────────────
+// Child device uploads a batch of location points (online flush or live stream)
+router.post('/batch', requireDeviceAuth, async (req, res, next) => {
+  try {
+    const { points } = batchSchema.parse(req.body);
+    const { child_id, parent_id } = req.device;
+
+    // Filter out points with accuracy > 80m to reject coarse cell-tower triangulations
+    const validPoints = points.filter((p) => p.accuracy == null || p.accuracy <= 80);
+    if (validPoints.length === 0) {
+      return res.status(200).json({ saved: 0, status: 'ignored_low_accuracy' });
+    }
+
+    // Build insert rows with PostGIS POINT
+    const now = new Date();
+    const deviceCreated = req.device?.created_at ? new Date(req.device.created_at) : null;
+
+    const rows = validPoints.map((p) => {
+      let recDate = new Date(p.recordedAt);
+      if (isNaN(recDate.getTime()) || recDate > now) {
+        recDate = now;
+      }
+      if (deviceCreated && recDate < deviceCreated) {
+        recDate = deviceCreated;
+      }
+      return {
+        child_id,
+        location: db.raw(`ST_SetSRID(ST_MakePoint(?, ?), 4326)`, [p.lng, p.lat]),
+        accuracy: p.accuracy ?? null,
+        speed: p.speed ?? null,
+        heading: p.heading ?? null,
+        altitude: p.altitude ?? null,
+        battery_level: p.batteryLevel ?? null,
+        is_charging: p.isCharging ?? null,
+        recorded_at: recDate,
+      };
+    });
+
+    // Upsert — ignore duplicate (child_id, recorded_at) pairs
+    await db('locations')
+      .insert(rows)
+      .onConflict(['child_id', 'recorded_at'])
+      .ignore();
+
+    // Broadcast latest point to parent in real-time
+    const latest = validPoints.reduce((a, b) =>
+      new Date(a.recordedAt) > new Date(b.recordedAt) ? a : b,
+    );
+
+
+    const io = getIO();
+    io.to(`parent:${parent_id}`).emit('location_update', {
+      childId: child_id,
+      lat: latest.lat,
+      lng: latest.lng,
+      accuracy: latest.accuracy,
+      speed: latest.speed,
+      heading: latest.heading,
+      batteryLevel: latest.batteryLevel,
+      isCharging: latest.isCharging,
+      recordedAt: latest.recordedAt,
+      timestamp: new Date().toISOString(),
+    });
+
+    // Update child_devices last_seen & battery
+    const deviceUpdate = { last_seen: new Date() };
+    if (latest.batteryLevel != null) {
+      deviceUpdate.battery_level = Number(latest.batteryLevel);
+    }
+    if (latest.isCharging != null) {
+      deviceUpdate.is_charging = Boolean(latest.isCharging);
+    }
+
+    await db('child_devices')
+      .where({ id: req.device.device_id || req.device.id })
+      .update(deviceUpdate);
+
+    io.to(`parent:${parent_id}`).emit('child_status', {
+      childId: child_id,
+      isOnline: true,
+      lastSeen: new Date().toISOString(),
+      batteryLevel: latest.batteryLevel,
+      isCharging: latest.isCharging,
+      speed: latest.speed != null ? Number(latest.speed) : undefined,
+    });
+
+    res.json({ received: points.length });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      console.error('Batch validation error:', JSON.stringify(err.issues, null, 2), 'body was:', JSON.stringify(req.body, null, 2));
+      return res.status(400).json({ error: 'Validation failed', issues: err.issues });
+    }
+    next(err);
+  }
+});
+
+// ── POST /api/location/status ─────────────────────────────────────────────────
+// Child device sends a heartbeat with battery/status info
+router.post('/status', requireDeviceAuth, async (req, res, next) => {
+  try {
+    const { child_id, parent_id } = req.device;
+    const { batteryLevel, isCharging, speed } = req.body;
+
+    const statusUpdate = { last_seen: new Date() };
+    if (batteryLevel != null) {
+      statusUpdate.battery_level = Number(batteryLevel);
+    }
+    if (isCharging != null) {
+      statusUpdate.is_charging = Boolean(isCharging);
+    }
+
+    await db('child_devices')
+      .where({ id: req.device.device_id || req.device.id })
+      .update(statusUpdate);
+
+    const io = getIO();
+    io.to(`parent:${parent_id}`).emit('child_status', {
+      childId: child_id,
+      batteryLevel: batteryLevel != null ? Number(batteryLevel) : undefined,
+      isCharging: isCharging != null ? Boolean(isCharging) : undefined,
+      speed: (speed !== undefined && speed !== null) ? Number(speed) : undefined,
+      isOnline: true,
+      lastSeen: new Date().toISOString(),
+    });
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/location/live/:childId ──────────────────────────────────────────
+// Parent: get last known location for a child
+router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
+  try {
+    const child = await db('children')
+      .where({ id: req.params.childId, parent_id: req.parent.id })
+      .first();
+    if (!child) throw new AppError('Child not found', 404);
+
+    const result = await db('locations')
+      .where({ child_id: req.params.childId })
+      .orderBy('recorded_at', 'desc')
+      .select(
+        'id',
+        db.raw('ST_Y(location::geometry) as lat'),
+        db.raw('ST_X(location::geometry) as lng'),
+        'accuracy', 'speed', 'heading', 'altitude',
+        'battery_level', 'is_charging',
+        'recorded_at', 'synced_at',
+      )
+      .first();
+
+    const activeDevice = await db('child_devices')
+      .where({ child_id: req.params.childId, is_active: true })
+      .orderBy('last_seen', 'desc')
+      .first();
+
+    if (result && activeDevice) {
+      if (activeDevice.battery_level != null) {
+        result.battery_level = activeDevice.battery_level;
+      }
+      if (activeDevice.is_charging != null) {
+        result.is_charging = activeDevice.is_charging;
+      }
+      if (activeDevice.last_seen) {
+        result.device_last_seen = activeDevice.last_seen;
+      }
+    }
+
+    res.json({
+      location: result || null,
+      device: activeDevice ? {
+        battery_level: activeDevice.battery_level,
+        is_charging: activeDevice.is_charging,
+        last_seen: activeDevice.last_seen,
+      } : null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/location/history ─────────────────────────────────────────────────
+// Parent: get location history for a child over a time range
+router.get('/history', requireParentAuth, async (req, res, next) => {
+  try {
+    const { childId, from, to, limit = 2000 } = req.query;
+
+    if (!childId) throw new AppError('childId required', 400);
+
+    const child = await db('children')
+      .where({ id: childId, parent_id: req.parent.id })
+      .first();
+    if (!child) throw new AppError('Child not found', 404);
+
+    let query = db('locations')
+      .where({ child_id: childId })
+      .where(function() {
+        this.whereNull('accuracy').orWhere('accuracy', '<=', 80);
+      })
+      .select(
+        'id',
+        db.raw('ST_Y(location::geometry) as lat'),
+        db.raw('ST_X(location::geometry) as lng'),
+        'accuracy', 'speed', 'heading', 'altitude',
+        'battery_level', 'is_charging', 'recorded_at',
+      )
+      .orderBy('recorded_at', 'asc')
+      .limit(Number(limit));
+
+
+    if (from) query = query.where('recorded_at', '>=', new Date(from));
+    if (to) query = query.where('recorded_at', '<=', new Date(to));
+
+    const points = await query;
+    res.json({ points, count: points.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/location/trips ───────────────────────────────────────────────────
+// Parent: get segmented trips for a child (gap > 10 min = new trip)
+router.get('/trips', requireParentAuth, async (req, res, next) => {
+  try {
+    const { childId, from, to } = req.query;
+    if (!childId) throw new AppError('childId required', 400);
+
+    const child = await db('children')
+      .where({ id: childId, parent_id: req.parent.id })
+      .first();
+    if (!child) throw new AppError('Child not found', 404);
+
+    let query = db('locations')
+      .where({ child_id: childId })
+      .select(
+        db.raw('ST_Y(location::geometry) as lat'),
+        db.raw('ST_X(location::geometry) as lng'),
+        'speed', 'heading', 'battery_level', 'is_charging', 'recorded_at',
+        // Gap detection: time since previous point
+        db.raw(`
+          EXTRACT(EPOCH FROM (recorded_at - LAG(recorded_at) OVER (ORDER BY recorded_at))) AS gap_seconds
+        `),
+      )
+      .orderBy('recorded_at', 'asc');
+
+    if (from) query = query.where('recorded_at', '>=', new Date(from));
+    if (to) query = query.where('recorded_at', '<=', new Date(to));
+
+    const points = await query;
+
+    // Segment into trips (gap > 600 seconds = 10 min)
+    const GAP_THRESHOLD = 600;
+    const trips = [];
+    let current = [];
+
+    for (const point of points) {
+      if (point.gap_seconds > GAP_THRESHOLD && current.length > 0) {
+        trips.push(current);
+        current = [];
+      }
+      current.push(point);
+    }
+    if (current.length > 0) trips.push(current);
+
+    // Compute trip stats
+    const tripsWithStats = trips.map((pts, i) => ({
+      tripIndex: i,
+      startTime: pts[0].recorded_at,
+      endTime: pts[pts.length - 1].recorded_at,
+      pointCount: pts.length,
+      maxSpeed: Math.max(...pts.map((p) => p.speed || 0)),
+      points: pts.map(({ gap_seconds: _gs, ...rest }) => rest),
+    }));
+
+    res.json({ trips: tripsWithStats });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;

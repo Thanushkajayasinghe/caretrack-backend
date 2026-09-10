@@ -1,0 +1,3 @@
+@echo off
+echo Starting Redis Server on localhost:6379...
+"C:\Users\Thanushka\AppData\Local\Microsoft\WinGet\Packages\taizod1024.redis-windows-fork_Microsoft.Winget.Source_8wekyb3d8bbwe\Redis-8.10.1-Windows-x64-msys2\redis-server.exe" --port 6379

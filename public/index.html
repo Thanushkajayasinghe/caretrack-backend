@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CareTrack — Parent Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Leaflet OpenStreetMap CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <!-- Socket.IO -->
+  <script src="/socket.io/socket.io.js"></script>
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- QRCode.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    :root {
+      --bg-primary: #0A0E1A;
+      --bg-secondary: #111827;
+      --bg-tertiary: #1A2236;
+      --brand-primary: #6C63FF;
+      --brand-secondary: #FF6584;
+      --brand-accent: #43E8D8;
+      --status-online: #10B981;
+      --status-offline: #6B7280;
+      --status-warning: #F59E0B;
+      --status-danger: #EF4444;
+      --text-primary: #F9FAFB;
+      --text-secondary: #9CA3AF;
+      --text-tertiary: #6B7280;
+      --glass-border: rgba(255, 255, 255, 0.08);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Nav */
+    header {
+      background: var(--bg-secondary);
+      border-bottom: 1px solid var(--glass-border);
+      padding: 14px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--brand-primary), #8B5CF6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 4px 14px rgba(108, 99, 255, 0.4);
+    }
+    .logo-title {
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: -0.5px;
+    }
+    .logo-subtitle {
+      font-size: 11px;
+      color: var(--text-tertiary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .nav-tabs {
+      display: flex;
+      gap: 8px;
+      background: var(--bg-tertiary);
+      padding: 4px;
+      border-radius: 12px;
+    }
+    .nav-tab {
+      padding: 8px 18px;
+      border-radius: 8px;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .nav-tab.active {
+      background: var(--brand-primary);
+      color: #fff;
+    }
+    .user-pill {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--bg-tertiary);
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--glass-border);
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .logout-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      font-size: 13px;
+      padding-left: 8px;
+      border-left: 1px solid var(--glass-border);
+    }
+    .logout-btn:hover { color: var(--status-danger); }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Auth Overlay */
+    #auth-view {
+      position: absolute;
+      inset: 0;
+      background: var(--bg-primary);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .auth-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 40px;
+      width: 100%;
+      max-width: 420px;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    }
+    .auth-card h2 { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+    .auth-card p { color: var(--text-secondary); font-size: 14px; margin-bottom: 24px; }
+    .input-group { margin-bottom: 18px; }
+    .input-group label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text-secondary); text-transform: uppercase; }
+    .input-group input {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--glass-border);
+      border-radius: 10px;
+      color: #fff;
+      font-size: 14px;
+      outline: none;
+    }
+    .input-group input:focus { border-color: var(--brand-primary); }
+    .primary-btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--brand-primary), #8B5CF6);
+      color: #fff;
+      font-weight: 600;
+      font-size: 15px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(108, 99, 255, 0.4);
+      transition: opacity 0.2s;
+    }
+    .primary-btn:hover { opacity: 0.9; }
+    .auth-switch {
+      text-align: center;
+      margin-top: 18px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    .auth-switch a { color: var(--brand-primary); text-decoration: none; font-weight: 600; cursor: pointer; }
+
+    /* Dashboard Layout */
+    .sidebar {
+      width: 380px;
+      background: var(--bg-secondary);
+      border-right: 1px solid var(--glass-border);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .sidebar-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--glass-border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .sidebar-title { font-weight: 700; font-size: 16px; }
+    .add-child-btn {
+      background: rgba(108, 99, 255, 0.15);
+      color: var(--brand-primary);
+      border: 1px solid rgba(108, 99, 255, 0.3);
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .child-list {
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .child-card {
+      background: var(--bg-tertiary);
+      border: 1px solid var(--glass-border);
+      border-radius: 16px;
+      padding: 18px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .child-card:hover, .child-card.active {
+      border-color: var(--brand-primary);
+      box-shadow: 0 0 15px rgba(108, 99, 255, 0.2);
+    }
+    .card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .child-info { display: flex; align-items: center; gap: 12px; }
+    .child-avatar {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      background: rgba(108, 99, 255, 0.25);
+      border: 1px solid rgba(108, 99, 255, 0.5);
+      color: var(--brand-primary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .child-name { font-weight: 700; font-size: 15px; }
+    .online-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--status-online);
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--status-online);
+      box-shadow: 0 0 8px var(--status-online);
+    }
+    .status-dot.offline {
+      background: var(--status-offline);
+      box-shadow: none;
+    }
+    .battery-box {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .card-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .remove-card-btn {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      color: var(--status-danger);
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .remove-card-btn:hover {
+      background: var(--status-danger);
+      color: #fff;
+    }
+    .card-address {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+    .card-chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--glass-border);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    /* Map Area */
+    .map-container {
+      flex: 1;
+      position: relative;
+    }
+    #osm-map {
+      width: 100%;
+      height: 100%;
+      background: #000;
+    }
+
+    /* Pairing Modal */
+    #pair-modal {
+      position: absolute;
+      inset: 0;
+      background: rgba(10, 14, 26, 0.85);
+      backdrop-filter: blur(8px);
+      z-index: 500;
+      display: none;
+      align-items: center;
+      justify-content: center;
+    }
+    .pair-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--glass-border);
+      border-radius: 24px;
+      padding: 36px;
+      width: 100%;
+      max-width: 440px;
+      text-align: center;
+      position: relative;
+    }
+    .close-modal {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 20px;
+      cursor: pointer;
+    }
+    .qr-wrapper {
+      background: #fff;
+      padding: 16px;
+      border-radius: 16px;
+      display: inline-block;
+      margin: 20px 0;
+    }
+    .pin-display {
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: 8px;
+      color: var(--brand-primary);
+      margin: 10px 0 20px;
+      font-family: monospace;
+    }
+    .timer-badge {
+      font-size: 13px;
+      color: var(--status-warning);
+      font-weight: 600;
+    }
+
+    /* Custom Leaflet Map Pin */
+    .leaflet-custom-pin {
+      background: transparent;
+      border: none;
+    }
+    .pin-bubble {
+      width: 46px;
+      height: 46px;
+      border-radius: 50%;
+      background: var(--brand-primary);
+      border: 3px solid #fff;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+      position: relative;
+    }
+    .pin-pulse {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      border: 2px solid var(--brand-primary);
+      animation: ripple 1.5s infinite;
+    }
+    @keyframes ripple {
+      0% { transform: scale(1); opacity: 1; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation -->
+  <header>
+    <div class="logo-container">
+      <div class="logo-badge">🛡️</div>
+      <div>
+        <div class="logo-title">CareTrack</div>
+        <div class="logo-subtitle">Live Parent Center</div>
+      </div>
+    </div>
+
+    <div class="nav-tabs">
+      <button class="nav-tab active" onclick="switchView('live')">Live Map</button>
+      <button class="nav-tab" onclick="openPairModal()">+ Pair Phone</button>
+    </div>
+
+    <div class="user-pill">
+      <span id="user-display">Logged In</span>
+      <button class="logout-btn" onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <!-- Main View -->
+  <main>
+    <!-- Left Sidebar: Child Cards -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-title">Tracked Devices</span>
+        <button class="add-child-btn" onclick="openPairModal()">+ Pair New</button>
+      </div>
+      <div class="child-list" id="child-cards-container">
+        <!-- Dynamically rendered -->
+      </div>
+    </div>
+
+    <!-- Right: Leaflet OpenStreetMap -->
+    <div class="map-container">
+      <div id="osm-map"></div>
+    </div>
+  </main>
+
+  <!-- Pairing Modal -->
+  <div id="pair-modal">
+    <div class="pair-card">
+      <button class="close-modal" onclick="closePairModal()">✕</button>
+      <h3 style="font-size: 20px; font-weight: 700;">Pair Child Device</h3>
+      <p style="font-size: 13px; color: var(--text-secondary); margin-top: 4px;">Scan this QR code from your phone or type the 6-digit PIN</p>
+
+      <div class="qr-wrapper" id="qrcode-box"></div>
+
+      <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-tertiary);">Or Enter 6-Digit PIN</div>
+      <div class="pin-display" id="pairing-pin">------</div>
+
+      <div class="timer-badge" id="pairing-timer">Expires in 05:00</div>
+    </div>
+  </div>
+
+  <!-- Auth Screen Overlay (if not logged in) -->
+  <div id="auth-view">
+    <div class="auth-card">
+      <h2 id="auth-title">Welcome to CareTrack</h2>
+      <p id="auth-sub">Sign in to your parent account</p>
+
+      <div class="input-group" id="name-group" style="display: none;">
+        <label>Your Name</label>
+        <input type="text" id="auth-name" placeholder="John Doe">
+      </div>
+
+      <div class="input-group">
+        <label>Email Address</label>
+        <input type="email" id="auth-email" placeholder="parent@example.com" value="parent@example.com">
+      </div>
+
+      <div class="input-group">
+        <label>Password</label>
+        <input type="password" id="auth-password" placeholder="••••••••" value="password123">
+      </div>
+
+      <button class="primary-btn" id="auth-submit-btn" onclick="handleAuthSubmit()">Sign In</button>
+
+      <div class="auth-switch">
+        <span id="auth-switch-text">Don't have an account?</span>
+        <a onclick="toggleAuthMode()" id="auth-switch-btn">Create one</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let isRegisterMode = false;
+    let currentUser = null;
+    let socket = null;
+    let map = null;
+    let markers = {};
+    let activeChildId = null;
+    let childrenData = [];
+    let pairCountdownInterval = null;
+
+    // ── Init Map ─────────────────────────────────────────────────────────────
+    function initMap() {
+      map = L.map('osm-map', { zoomControl: false }).setView([6.9271, 79.8612], 13);
+      L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+      // OpenStreetMap Tiles
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap contributors'
+      }).addTo(map);
+    }
+
+    // ── Check Auth ───────────────────────────────────────────────────────────
+    window.addEventListener('load', () => {
+      initMap();
+      const token = localStorage.getItem('accessToken');
+      const user = localStorage.getItem('parentUser');
+      if (token && user) {
+        currentUser = JSON.parse(user);
+        document.getElementById('auth-view').style.display = 'none';
+        document.getElementById('user-display').innerText = currentUser.name || currentUser.email;
+        startApp();
+      }
+    });
+
+    function toggleAuthMode() {
+      isRegisterMode = !isRegisterMode;
+      document.getElementById('auth-title').innerText = isRegisterMode ? 'Create Account' : 'Welcome Back';
+      document.getElementById('auth-sub').innerText = isRegisterMode ? 'Start tracking child devices' : 'Sign in to your parent account';
+      document.getElementById('name-group').style.display = isRegisterMode ? 'block' : 'none';
+      document.getElementById('auth-submit-btn').innerText = isRegisterMode ? 'Create Account' : 'Sign In';
+      document.getElementById('auth-switch-text').innerText = isRegisterMode ? 'Already have an account?' : "Don't have an account?";
+      document.getElementById('auth-switch-btn').innerText = isRegisterMode ? 'Sign In' : 'Create one';
+    }
+
+    async function handleAuthSubmit() {
+      const email = document.getElementById('auth-email').value.trim();
+      const password = document.getElementById('auth-password').value;
+      const name = document.getElementById('auth-name').value.trim();
+
+      const endpoint = isRegisterMode ? '/api/auth/register' : '/api/auth/login';
+      const body = isRegisterMode ? { email, password, name } : { email, password };
+
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Authentication failed');
+
+        localStorage.setItem('accessToken', data.accessToken);
+        localStorage.setItem('refreshToken', data.refreshToken);
+        localStorage.setItem('parentUser', JSON.stringify(data.parent));
+        currentUser = data.parent;
+
+        document.getElementById('auth-view').style.display = 'none';
+        document.getElementById('user-display').innerText = currentUser.name;
+        startApp();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    function logout() {
+      localStorage.clear();
+      window.location.reload();
+    }
+
+    // ── Start Application ────────────────────────────────────────────────────
+    async function startApp() {
+      await loadChildren();
+      connectSocket();
+    }
+
+    function connectSocket() {
+      const token = localStorage.getItem('accessToken');
+      socket = io({
+        auth: { token, clientType: 'parent' },
+      });
+
+      socket.on('connect', () => console.log('✅ Connected to live WebSocket server'));
+
+      // Real-time location push
+      socket.on('location_update', (data) => {
+        console.log('📍 Live location update received:', data);
+        updateChildLocation(data);
+      });
+
+      // Child paired in real time
+      socket.on('child_paired', (data) => {
+        alert('🎉 Child device successfully paired!');
+        closePairModal();
+        loadChildren();
+      });
+
+      socket.on('child_status', (data) => {
+        updateChildStatus(data);
+      });
+    }
+
+    async function apiFetch(url, options = {}) {
+      let token = localStorage.getItem('accessToken');
+      options.headers = options.headers || {};
+      options.headers['Authorization'] = `Bearer ${token}`;
+
+      let res = await fetch(url, options);
+      if (res.status === 401) {
+        // Try refresh token
+        const refreshToken = localStorage.getItem('refreshToken');
+        const user = JSON.parse(localStorage.getItem('parentUser') || '{}');
+        if (refreshToken && user.id) {
+          const refreshRes = await fetch('/api/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken, parentId: user.id }),
+          });
+          if (refreshRes.ok) {
+            const data = await refreshRes.json();
+            localStorage.setItem('accessToken', data.accessToken);
+            localStorage.setItem('refreshToken', data.refreshToken);
+            options.headers['Authorization'] = `Bearer ${data.accessToken}`;
+            res = await fetch(url, options);
+          } else {
+            // Relog required
+            localStorage.clear();
+            document.getElementById('auth-view').style.display = 'flex';
+            return null;
+          }
+        } else {
+          localStorage.clear();
+          document.getElementById('auth-view').style.display = 'flex';
+          return null;
+        }
+      }
+      return res;
+    }
+
+    async function loadChildren() {
+      const res = await apiFetch('/api/children');
+      if (!res) return;
+      const data = await res.json();
+      childrenData = data.children || [];
+      renderChildCards();
+      renderMarkers();
+    }
+
+    function renderChildCards() {
+      const container = document.getElementById('child-cards-container');
+      if (childrenData.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; padding: 40px 10px; color: var(--text-tertiary);">
+            <div style="font-size: 32px; margin-bottom: 8px;">📱</div>
+            <div style="font-weight: 600; color: #fff; margin-bottom: 4px;">No devices paired</div>
+            <div style="font-size: 13px;">Click "+ Pair New" to connect your phone</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = childrenData.map(child => {
+        const last = child.lastLocation || {};
+        const isOnline = child.isOnline ?? (last.recorded_at && (new Date() - new Date(last.recorded_at) < 120000));
+        return `
+          <div class="child-card ${activeChildId === child.id ? 'active' : ''}" onclick="selectChild('${child.id}')">
+            <div class="card-top">
+              <div class="child-info">
+                <div class="child-avatar" style="border-color: ${child.avatar_color}; color: ${child.avatar_color}">
+                  ${child.name[0].toUpperCase()}
+                </div>
+                <div>
+                  <div class="child-name">${child.name}</div>
+                  <div class="online-indicator">
+                    <div class="status-dot ${isOnline ? '' : 'offline'}"></div>
+                    <span id="status-text-${child.id}">${isOnline ? 'Online' : 'Offline'}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="card-right">
+                <div class="battery-box">
+                  <span>🔋</span>
+                  <span>${last.battery_level != null ? last.battery_level + '%' : '—'}</span>
+                </div>
+                <button class="remove-card-btn" title="Remove device" onclick="event.stopPropagation(); deleteChild('${child.id}', '${child.name}')">🗑</button>
+              </div>
+            </div>
+            <div class="card-address" id="addr-${child.id}">
+              ${last.lat ? `${last.lat.toFixed(4)}, ${last.lng.toFixed(4)}` : 'Awaiting first location fix...'}
+            </div>
+            <div class="card-chips">
+              <div class="chip">⚡ Speed: ${last.speed ? (last.speed * 3.6).toFixed(0) + ' km/h' : '0 km/h'}</div>
+              <div class="chip">📱 ${child.device_name || 'Android Device'}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function selectChild(childId) {
+      activeChildId = childId;
+      renderChildCards();
+      const child = childrenData.find(c => c.id === childId);
+      if (child?.lastLocation?.lat) {
+        map.flyTo([child.lastLocation.lat, child.lastLocation.lng], 16, { animate: true });
+      }
+    }
+
+    function renderMarkers() {
+      childrenData.forEach(child => {
+        if (child.lastLocation?.lat) {
+          updateMarker(child.id, child.name, child.lastLocation.lat, child.lastLocation.lng, child.avatar_color);
+        }
+      });
+    }
+
+    function updateMarker(childId, name, lat, lng, color = '#6C63FF') {
+      const customIcon = L.divIcon({
+        className: 'leaflet-custom-pin',
+        html: `
+          <div class="pin-bubble" style="background: ${color}">
+            <div class="pin-pulse" style="border-color: ${color}"></div>
+            ${name[0].toUpperCase()}
+          </div>
+        `,
+        iconSize: [46, 46],
+        iconAnchor: [23, 23]
+      });
+
+      if (markers[childId]) {
+        markers[childId].setLatLng([lat, lng]);
+      } else {
+        markers[childId] = L.marker([lat, lng], { icon: customIcon }).addTo(map);
+      }
+    }
+
+    function updateChildLocation(data) {
+      const child = childrenData.find(c => c.id === data.childId);
+      if (child) {
+        child.lastLocation = data;
+        child.isOnline = true;
+        renderChildCards();
+        updateMarker(data.childId, child.name, data.lat, data.lng, child.avatar_color);
+        if (activeChildId === data.childId) {
+          map.panTo([data.lat, data.lng]);
+        }
+      }
+    }
+
+    function updateChildStatus(data) {
+      const child = childrenData.find(c => c.id === data.childId);
+      if (child) {
+        child.isOnline = data.isOnline;
+        if (data.batteryLevel != null) {
+          child.lastLocation = child.lastLocation || {};
+          child.lastLocation.battery_level = data.batteryLevel;
+          child.lastLocation.is_charging = data.isCharging;
+        }
+        renderChildCards();
+      }
+    }
+
+    async function deleteChild(childId, name) {
+      if (!confirm(`Are you sure you want to remove "${name}"?`)) return;
+      try {
+        const res = await apiFetch(`/api/children/${childId}`, {
+          method: 'DELETE',
+        });
+        if (!res || !res.ok) throw new Error('Failed to delete');
+        if (markers[childId]) {
+          map.removeLayer(markers[childId]);
+          delete markers[childId];
+        }
+        await loadChildren();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    // ── Pairing Modal ────────────────────────────────────────────────────────
+    async function openPairModal() {
+      document.getElementById('pair-modal').style.display = 'flex';
+
+      const childName = prompt('Enter a name for this device:', 'Alex Phone') || 'Alex Phone';
+
+      const res = await apiFetch('/api/pair/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ childName })
+      });
+      if (!res) return;
+
+      const data = await res.json();
+      document.getElementById('pairing-pin').innerText = data.otp;
+
+      // Render QR Code
+      const qrBox = document.getElementById('qrcode-box');
+      qrBox.innerHTML = '';
+      new QRCode(qrBox, {
+        text: data.qrPayload,
+        width: 180,
+        height: 180,
+        colorDark: "#0A0E1A",
+        colorLight: "#ffffff",
+      });
+
+      // Start Countdown
+      let seconds = data.expiresIn || 300;
+      clearInterval(pairCountdownInterval);
+      pairCountdownInterval = setInterval(() => {
+        seconds--;
+        if (seconds <= 0) {
+          clearInterval(pairCountdownInterval);
+          closePairModal();
+        }
+        const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+        const s = String(seconds % 60).padStart(2, '0');
+        document.getElementById('pairing-timer').innerText = `Expires in ${m}:${s}`;
+      }, 1000);
+    }
+
+    function closePairModal() {
+      document.getElementById('pair-modal').style.display = 'none';
+      clearInterval(pairCountdownInterval);
+    }
+  </script>
+</body>
+</html>

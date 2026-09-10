@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>CareTrack Child Client</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    :root {
+      --bg-primary: #0A0E1A;
+      --bg-secondary: #111827;
+      --bg-tertiary: #1A2236;
+      --brand-primary: #6C63FF;
+      --status-online: #10B981;
+      --text-primary: #F9FAFB;
+      --text-secondary: #9CA3AF;
+      --text-tertiary: #6B7280;
+      --glass-border: rgba(255, 255, 255, 0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      overflow-x: hidden;
+    }
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--glass-border);
+      border-radius: 28px;
+      padding: 36px 24px;
+      text-align: center;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+      position: relative;
+    }
+    .shield-badge {
+      width: 80px;
+      height: 80px;
+      border-radius: 26px;
+      background: linear-gradient(135deg, var(--brand-primary), #8B5CF6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 38px;
+      margin: 0 auto 20px;
+      box-shadow: 0 10px 25px rgba(108, 99, 255, 0.4);
+      position: relative;
+    }
+    .pulse-ring {
+      position: absolute;
+      inset: -8px;
+      border-radius: 32px;
+      border: 2px solid var(--brand-primary);
+      animation: ripple 2s infinite;
+    }
+    @keyframes ripple {
+      0% { transform: scale(1); opacity: 0.8; }
+      100% { transform: scale(1.3); opacity: 0; }
+    }
+    h2 { font-size: 24px; font-weight: 800; margin-bottom: 8px; }
+    p { font-size: 14px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 28px; }
+    .pin-input-group {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 24px;
+    }
+    .pin-box {
+      width: 46px;
+      height: 56px;
+      background: var(--bg-tertiary);
+      border: 1.5px solid var(--glass-border);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--brand-primary);
+    }
+    .pin-box.active {
+      border-color: var(--brand-primary);
+      box-shadow: 0 0 12px rgba(108, 99, 255, 0.3);
+    }
+    .native-input {
+      position: absolute;
+      opacity: 0.01;
+      width: 100px;
+      height: 40px;
+    }
+    .btn {
+      width: 100%;
+      padding: 16px;
+      border-radius: 14px;
+      border: none;
+      background: linear-gradient(135deg, var(--brand-primary), #8B5CF6);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 4px 15px rgba(108, 99, 255, 0.4);
+    }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    /* Protected State */
+    .status-list {
+      background: var(--bg-tertiary);
+      border-radius: 18px;
+      border: 1px solid var(--glass-border);
+      padding: 16px;
+      text-align: left;
+      margin-bottom: 24px;
+    }
+    .status-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 13px;
+    }
+    .status-item:last-child { border-bottom: none; }
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--status-online);
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-online); }
+  </style>
+</head>
+<body>
+
+  <div class="card" id="main-card">
+    <!-- Unpaired View -->
+    <div id="unpaired-view">
+      <div class="shield-badge">
+        <span>📲</span>
+      </div>
+      <h2>Connect to Parent</h2>
+      <p>Enter the 6-digit code shown on the Parent Dashboard screen</p>
+
+      <div class="pin-input-group" onclick="focusInput()">
+        <div class="pin-box" id="box-0"></div>
+        <div class="pin-box" id="box-1"></div>
+        <div class="pin-box" id="box-2"></div>
+        <div class="pin-box" id="box-3"></div>
+        <div class="pin-box" id="box-4"></div>
+        <div class="pin-box" id="box-5"></div>
+      </div>
+
+      <input type="tel" id="hidden-pin" class="native-input" maxlength="6" autofocus oninput="onPinInput(this.value)">
+
+      <button class="btn" id="connect-btn" disabled onclick="submitPairing()">Pair This Phone</button>
+    </div>
+
+    <!-- Paired & Monitoring View -->
+    <div id="paired-view" style="display: none;">
+      <div class="shield-badge">
+        <div class="pulse-ring"></div>
+        <span>🛡️</span>
+      </div>
+      <h2>Device Protected</h2>
+      <p>Live background location and status sharing active</p>
+
+      <div class="status-list">
+        <div class="status-item">
+          <span>📍 Real Coordinates</span>
+          <span class="status-badge" id="gps-coords">Detecting...</span>
+        </div>
+        <div class="status-item">
+          <span>📡 Server Link</span>
+          <span class="status-badge" id="server-link-status"><span class="dot"></span> Online</span>
+        </div>
+        <div class="status-item">
+          <span>🔋 Battery Monitor</span>
+          <span class="status-badge" id="battery-status">Reading...</span>
+        </div>
+      </div>
+
+      <div id="gps-perm-notice" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 10px; padding: 10px 12px; margin-top: 12px; font-size: 12px; color: #fca5a5; text-align: left;">
+        ⚠️ <b>Browser Location Restricted by Chrome HTTP Policy</b><br>
+        Mobile browsers strictly require <b>HTTPS</b> to prompt for hardware GPS. You can either use the quick location picker below or test coordinates anywhere in the world!
+      </div>
+
+      <!-- Quick Location & Battery Adjuster for Web Testing -->
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 12px; padding: 14px; margin-top: 16px; text-align: left;">
+        <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: #fff;">⚙️ Device Simulation Controls</div>
+        
+        <label style="font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Battery Level: <span id="bat-slider-val" style="color: var(--brand-primary); font-weight: 700;">85%</span></label>
+        <input type="range" id="bat-slider" min="1" max="100" value="85" style="width: 100%; margin-bottom: 12px;" oninput="onBatterySliderChange(this.value)">
+
+        <label style="font-size: 11px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Quick Location Preset:</label>
+        <select id="loc-preset" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--glass-border); color: #fff; padding: 8px; border-radius: 8px; font-size: 13px; margin-bottom: 8px;" onchange="onPresetChange(this.value)">
+          <option value="current">📱 Phone Real GPS (if allowed)</option>
+          <option value="6.9271,79.8612">🇱🇰 Colombo, Sri Lanka</option>
+          <option value="7.2906,80.6337">🇱🇰 Kandy, Sri Lanka</option>
+          <option value="6.0535,80.2210">🇱🇰 Galle, Sri Lanka</option>
+          <option value="40.7128,-74.0060">🇺🇸 New York City</option>
+          <option value="51.5074,-0.1278">🇬🇧 London</option>
+          <option value="custom">✏️ Enter Custom Lat, Lng...</option>
+        </select>
+
+        <div id="custom-coords-box" style="display: none; gap: 8px; margin-bottom: 8px;">
+          <input type="number" step="any" id="custom-lat" placeholder="Latitude" style="width: 50%; background: var(--bg-tertiary); border: 1px solid var(--glass-border); color: #fff; padding: 8px; border-radius: 8px; font-size: 12px;">
+          <input type="number" step="any" id="custom-lng" placeholder="Longitude" style="width: 50%; background: var(--bg-tertiary); border: 1px solid var(--glass-border); color: #fff; padding: 8px; border-radius: 8px; font-size: 12px;">
+        </div>
+
+        <button class="btn" style="background: var(--brand-primary); color: #fff; padding: 10px; font-size: 13px; margin-top: 4px;" onclick="sendManualLocation()">🚀 Transmit Location & Battery</button>
+      </div>
+      <div id="manual-loc-msg" style="font-size: 12px; color: var(--status-online); margin-top: 8px; display: none;">✅ Dispatched to parent dashboard!</div>
+
+      <p style="font-size: 12px; color: var(--text-tertiary); margin-top: 14px; margin-bottom: 0;">
+        Keep this tab open. Live GPS coords are streaming directly to your Parent Dashboard.
+      </p>
+    </div>
+  </div>
+
+  <script>
+    let currentCode = '';
+    let socket = null;
+    let gpsWatchId = null;
+
+    function focusInput() {
+      document.getElementById('hidden-pin').focus();
+    }
+
+    function onPinInput(val) {
+      currentCode = val.replace(/[^0-9]/g, '').slice(0, 6);
+      for (let i = 0; i < 6; i++) {
+        const box = document.getElementById(`box-${i}`);
+        box.innerText = currentCode[i] || '';
+        box.classList.toggle('active', i === currentCode.length);
+      }
+      document.getElementById('connect-btn').disabled = currentCode.length < 6;
+      if (currentCode.length === 6) {
+        submitPairing();
+      }
+    }
+
+    async function submitPairing() {
+      const btn = document.getElementById('connect-btn');
+      btn.innerText = 'Connecting...';
+      btn.disabled = true;
+
+      // Fingerprint this browser/phone
+      const fingerprint = 'phone_' + navigator.userAgent.slice(0, 40).replace(/[^a-zA-Z0-9]/g, '_') + '_' + (localStorage.getItem('dev_id') || Math.random().toString(36).substring(2, 10));
+      localStorage.setItem('dev_id', fingerprint);
+
+      try {
+        const res = await fetch('/api/pair/claim', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            otp: currentCode,
+            deviceFingerprint: fingerprint,
+            deviceName: navigator.userAgent.includes('Mobile') ? 'Mobile Phone' : 'Web Device',
+            androidVersion: navigator.platform || 'Android',
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Pairing failed. Please check the code.');
+
+        localStorage.setItem('deviceToken', data.deviceToken);
+        localStorage.setItem('deviceFingerprint', fingerprint);
+        localStorage.setItem('childId', data.childId);
+
+        showProtectedState();
+      } catch (err) {
+        alert(err.message);
+        btn.innerText = 'Pair This Phone';
+        btn.disabled = false;
+      }
+    }
+
+    let currentBatteryLevel = 100;
+    let isDeviceCharging = false;
+
+    function showProtectedState() {
+      document.getElementById('unpaired-view').style.display = 'none';
+      document.getElementById('paired-view').style.display = 'block';
+
+      // Start Battery API
+      if (navigator.getBattery) {
+        navigator.getBattery().then(b => {
+          const updateBat = () => {
+            currentBatteryLevel = Math.round(b.level * 100);
+            isDeviceCharging = b.charging;
+            document.getElementById('battery-status').innerText = `${currentBatteryLevel}%${isDeviceCharging ? ' ⚡' : ''}`;
+          };
+          updateBat();
+          b.addEventListener('levelchange', updateBat);
+          b.addEventListener('chargingchange', updateBat);
+        }).catch(() => {
+          document.getElementById('battery-status').innerText = 'N/A';
+        });
+      } else {
+        document.getElementById('battery-status').innerText = 'N/A';
+      }
+
+      // Connect Socket as child
+      const token = localStorage.getItem('deviceToken');
+      const fp = localStorage.getItem('deviceFingerprint');
+      socket = io({
+        auth: { token, clientType: 'child', deviceFingerprint: fp },
+        reconnection: true,
+        reconnectionDelay: 1000,
+      });
+
+      socket.on('connect', () => {
+        console.log('✅ Child connected to WebSocket server');
+        const linkBadge = document.getElementById('server-link-status');
+        if (linkBadge) linkBadge.innerHTML = '<span class="dot"></span> Online';
+        // Send initial heartbeat with real battery
+        socket.emit('status_heartbeat', { isOnline: true, batteryLevel: currentBatteryLevel, isCharging: isDeviceCharging });
+      });
+
+      socket.on('disconnect', (reason) => {
+        console.warn('❌ Child socket disconnected:', reason);
+        const linkBadge = document.getElementById('server-link-status');
+        if (linkBadge) linkBadge.innerHTML = '<span class="dot" style="background:#6B7280"></span> Disconnected';
+      });
+
+      // Heartbeat every 20s
+      setInterval(() => {
+        if (socket && socket.connected) {
+          socket.emit('status_heartbeat', { isOnline: true, batteryLevel: currentBatteryLevel, isCharging: isDeviceCharging });
+        }
+      }, 20000);
+
+      // Start Live GPS tracking
+      startGPSTracking();
+    }
+
+    function startGPSTracking() {
+      if (!navigator.geolocation) {
+        document.getElementById('gps-status').innerText = 'GPS not supported';
+        return;
+      }
+
+      const sendLocation = (pos) => {
+        const point = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          speed: pos.coords.speed || 0,
+          heading: pos.coords.heading || 0,
+          altitude: pos.coords.altitude || 0,
+          batteryLevel: currentBatteryLevel,
+          isCharging: isDeviceCharging,
+          recordedAt: new Date(pos.timestamp).toISOString(),
+        };
+
+        const gpsBadge = document.getElementById('gps-coords');
+        if (gpsBadge) gpsBadge.innerHTML = '<span class="dot"></span> ' + pos.coords.latitude.toFixed(4) + ', ' + pos.coords.longitude.toFixed(4);
+        const notice = document.getElementById('gps-perm-notice');
+        if (notice) notice.style.display = 'none';
+
+        // Send via live socket
+        if (socket && socket.connected) {
+          socket.emit('location_update', point);
+        }
+
+        // Also push to batch API
+        const token = localStorage.getItem('deviceToken');
+        const fp = localStorage.getItem('deviceFingerprint');
+        fetch('/api/location/batch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-Device-Fingerprint': fp,
+          },
+          body: JSON.stringify({ points: [point] })
+        }).catch(() => {});
+      };
+
+      const handleGPSError = (err) => {
+        console.warn('GPS error:', err.message);
+        const gpsBadge = document.getElementById('gps-coords');
+        if (gpsBadge) {
+          gpsBadge.innerHTML = '<span class="dot" style="background:#F59E0B"></span> Blocked';
+        }
+        const notice = document.getElementById('gps-perm-notice');
+        if (notice) notice.style.display = 'block';
+      };
+
+      // Send immediate first fix
+      navigator.geolocation.getCurrentPosition(
+        sendLocation,
+        handleGPSError,
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+
+      gpsWatchId = navigator.geolocation.watchPosition(
+        sendLocation,
+        handleGPSError,
+        { enableHighAccuracy: true, maximumAge: 2000, timeout: 10000 }
+      );
+    }
+
+    function onBatterySliderChange(val) {
+      currentBatteryLevel = parseInt(val, 10);
+      document.getElementById('bat-slider-val').innerText = `${val}%`;
+      const batBadge = document.getElementById('battery-status');
+      if (batBadge) batBadge.innerText = `${val}%`;
+      if (socket && socket.connected) {
+        socket.emit('status_heartbeat', { isOnline: true, batteryLevel: currentBatteryLevel, isCharging: isDeviceCharging });
+      }
+    }
+
+    function onPresetChange(val) {
+      const customBox = document.getElementById('custom-coords-box');
+      if (val === 'custom') {
+        customBox.style.display = 'flex';
+      } else {
+        customBox.style.display = 'none';
+      }
+    }
+
+    function sendManualLocation() {
+      const fallback = (lat, lng, accuracy = 10) => {
+        const point = {
+          lat,
+          lng,
+          accuracy,
+          speed: 0,
+          heading: 0,
+          altitude: 10,
+          batteryLevel: currentBatteryLevel,
+          isCharging: isDeviceCharging,
+          recordedAt: new Date().toISOString(),
+        };
+
+        const gpsBadge = document.getElementById('gps-coords');
+        if (gpsBadge) gpsBadge.innerHTML = '<span class="dot"></span> ' + lat.toFixed(4) + ', ' + lng.toFixed(4);
+
+        if (socket && socket.connected) {
+          socket.emit('location_update', point);
+        }
+        const token = localStorage.getItem('deviceToken');
+        const fp = localStorage.getItem('deviceFingerprint');
+        fetch('/api/location/batch', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'X-Device-Fingerprint': fp,
+          },
+          body: JSON.stringify({ points: [point] })
+        }).catch(() => {});
+
+        const msg = document.getElementById('manual-loc-msg');
+        if (msg) {
+          msg.style.display = 'block';
+          setTimeout(() => { msg.style.display = 'none'; }, 3000);
+        }
+      };
+
+      const preset = document.getElementById('loc-preset').value;
+      if (preset === 'custom') {
+        const lat = parseFloat(document.getElementById('custom-lat').value);
+        const lng = parseFloat(document.getElementById('custom-lng').value);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          return fallback(lat, lng, 10);
+        }
+      } else if (preset !== 'current') {
+        const [lat, lng] = preset.split(',').map(Number);
+        return fallback(lat, lng, 10);
+      }
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => fallback(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+          (err) => {
+            console.warn('Geolocation error:', err.message);
+            fetch('https://ipapi.co/json/')
+              .then(r => r.json())
+              .then(data => {
+                if (data.latitude && data.longitude) {
+                  fallback(data.latitude, data.longitude, 2000);
+                } else {
+                  fallback(6.9271, 79.8612, 5000);
+                }
+              })
+              .catch(() => fallback(6.9271, 79.8612, 5000));
+          },
+          { enableHighAccuracy: true, timeout: 10000 }
+        );
+      } else {
+        fallback(6.9271, 79.8612);
+      }
+    }
+
+    // Auto-resume if already paired
+    window.addEventListener('load', () => {
+      if (localStorage.getItem('deviceToken')) {
+        showProtectedState();
+      }
+    });
+  </script>
+</body>
+</html>
