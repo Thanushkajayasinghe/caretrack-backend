@@ -62,7 +62,7 @@ app.use('/api/pair', pairRouter);
 app.use('/api/location', locationRouter);
 
 // ── Health check ─────────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
+app.get('/health', (_req, res) => res.json({ status: 'ok', v: '8dc6f4a', ts: new Date().toISOString() }));
 
 // ── Web Parent Dashboard ─────────────────────────────────────────────────────
 setupWebDashboard(app);
