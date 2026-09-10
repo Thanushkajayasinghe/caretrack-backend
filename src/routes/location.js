@@ -4,7 +4,7 @@ import { db } from '../config/db.js';
 import { requireDeviceAuth, requireParentAuth } from '../middleware/auth.js';
 import { getIO } from '../sockets/index.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { cacheLocation, getCachedLatestLocation, getCachedTrail } from '../services/locationCache.js';
+import { cacheLocation, getCachedLatestLocation, getCachedTrail, updateCachedDeviceStatus } from '../services/locationCache.js';
 
 const router = express.Router();
 
@@ -142,6 +142,13 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
       .where({ id: req.device.device_id || req.device.id })
       .update(statusUpdate);
 
+    // Keep Redis location cache in sync with the new battery status
+    updateCachedDeviceStatus(child_id, {
+      batteryLevel,
+      isCharging,
+      lastSeen: new Date().toISOString(),
+    });
+
     const io = getIO();
     io.to(`parent:${parent_id}`).emit('child_status', {
       childId: child_id,
@@ -167,15 +174,28 @@ router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
       .first();
     if (!child) throw new AppError('Child not found', 404);
 
+    const activeDevice = await db('child_devices')
+      .where({ child_id: req.params.childId, is_active: true })
+      .orderBy('last_seen', 'desc')
+      .first();
+
     // 1. Try Redis cache first (Sub-20ms instant RAM response)
     const cachedLoc = await getCachedLatestLocation(req.params.childId);
     if (cachedLoc) {
+      const battery = activeDevice?.battery_level ?? cachedLoc.battery_level;
+      const charging = activeDevice?.is_charging ?? cachedLoc.is_charging;
+      const lastSeen = activeDevice?.last_seen || cachedLoc.recorded_at;
+
       return res.json({
-        location: cachedLoc,
+        location: {
+          ...cachedLoc,
+          battery_level: battery,
+          is_charging: charging,
+        },
         device: {
-          battery_level: cachedLoc.battery_level,
-          is_charging: cachedLoc.is_charging,
-          last_seen: cachedLoc.recorded_at,
+          battery_level: battery,
+          is_charging: charging,
+          last_seen: lastSeen,
         },
         cached: true,
       });

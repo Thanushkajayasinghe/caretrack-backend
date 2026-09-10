@@ -100,8 +100,42 @@ export async function getCachedTrail(childId, limit = 100) {
   }
 }
 
+/**
+ * Update cached battery & charging state in the child's latest location cache.
+ * Ensures status heartbeats immediately reflect in Redis without waiting for a new GPS fix.
+ */
+export async function updateCachedDeviceStatus(childId, { batteryLevel, isCharging, lastSeen } = {}) {
+  if (!childId) return;
+
+  try {
+    const redis = getRedis();
+    if (!redis || typeof redis.get !== 'function' || typeof redis.setex !== 'function') return;
+
+    const key = `${LATEST_KEY_PREFIX}${childId}`;
+    const raw = await redis.get(key);
+    if (!raw) return;
+
+    const data = JSON.parse(raw);
+    if (batteryLevel !== undefined && batteryLevel !== null) {
+      data.battery_level = Number(batteryLevel);
+    }
+    if (isCharging !== undefined && isCharging !== null) {
+      data.is_charging = Boolean(isCharging);
+    }
+    if (lastSeen) {
+      data.last_seen = lastSeen;
+    }
+    data.cached_at = new Date().toISOString();
+
+    await redis.setex(key, TTL_SECONDS, JSON.stringify(data)).catch(() => {});
+  } catch (err) {
+    console.warn('⚠️ [Redis LocationCache] Failed to update cached device status:', err.message);
+  }
+}
+
 export default {
   cacheLocation,
   getCachedLatestLocation,
   getCachedTrail,
+  updateCachedDeviceStatus,
 };
