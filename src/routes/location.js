@@ -215,11 +215,6 @@ router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
       )
       .first();
 
-    const activeDevice = await db('child_devices')
-      .where({ child_id: req.params.childId, is_active: true })
-      .orderBy('last_seen', 'desc')
-      .first();
-
     if (result && activeDevice) {
       if (activeDevice.battery_level != null) {
         result.battery_level = activeDevice.battery_level;
