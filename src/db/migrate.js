@@ -124,7 +124,20 @@ export async function runMigrations() {
 }
 
 // Run directly: node src/db/migrate.js
-import { connectDB } from '../config/db.js';
-await connectDB();
-await runMigrations();
-process.exit(0);
+const isDirectRun = process.argv[1] && (
+  process.argv[1].endsWith('migrate.js') || 
+  process.argv[1].endsWith('migrate')
+);
+
+if (isDirectRun) {
+  import('../config/db.js').then(async ({ connectDB }) => {
+    try {
+      await connectDB();
+      await runMigrations();
+      process.exit(0);
+    } catch (e) {
+      console.error(e);
+      process.exit(1);
+    }
+  });
+}

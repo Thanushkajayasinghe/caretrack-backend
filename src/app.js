@@ -7,6 +7,7 @@ import morgan from 'morgan';
 import { rateLimit } from 'express-rate-limit';
 import { initSocket } from './sockets/index.js';
 import { connectDB } from './config/db.js';
+import { runMigrations } from './db/migrate.js';
 import { connectRedis } from './config/redis.js';
 import authRouter from './routes/auth.js';
 import childRouter from './routes/child.js';
@@ -76,6 +77,11 @@ app.use(errorHandler);
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
 async function bootstrap() {
   await connectDB();
+  try {
+    await runMigrations();
+  } catch (migErr) {
+    console.warn('Migration run warning:', migErr.message);
+  }
   await connectRedis();
   initSocket(httpServer);
 

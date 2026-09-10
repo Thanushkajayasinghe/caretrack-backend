@@ -40,21 +40,39 @@ export async function requireDeviceAuth(req, res, next) {
   const fingerprintHash = hashFingerprint(fingerprint);
 
   try {
-    const device = await db('child_devices')
-      .join('children', 'children.id', 'child_devices.child_id')
-      .where({
-        'child_devices.device_token_hash': tokenHash,
-        'child_devices.device_fingerprint_hash': fingerprintHash,
-        'child_devices.is_active': true,
-      })
-      .select(
-        'child_devices.id as device_id',
-        'child_devices.id as id',
-        'child_devices.child_id',
-        'children.parent_id',
-        'child_devices.movement_threshold',
-      )
-      .first();
+    let device;
+    try {
+      device = await db('child_devices')
+        .join('children', 'children.id', 'child_devices.child_id')
+        .where({
+          'child_devices.device_token_hash': tokenHash,
+          'child_devices.device_fingerprint_hash': fingerprintHash,
+          'child_devices.is_active': true,
+        })
+        .select(
+          'child_devices.id as device_id',
+          'child_devices.id as id',
+          'child_devices.child_id',
+          'children.parent_id',
+          'child_devices.movement_threshold',
+        )
+        .first();
+    } catch (_e) {
+      device = await db('child_devices')
+        .join('children', 'children.id', 'child_devices.child_id')
+        .where({
+          'child_devices.device_token_hash': tokenHash,
+          'child_devices.device_fingerprint_hash': fingerprintHash,
+          'child_devices.is_active': true,
+        })
+        .select(
+          'child_devices.id as device_id',
+          'child_devices.id as id',
+          'child_devices.child_id',
+          'children.parent_id',
+        )
+        .first();
+    }
 
     if (!device) {
       return res.status(401).json({ error: 'Invalid or revoked device token' });

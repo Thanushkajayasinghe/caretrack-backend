@@ -15,26 +15,50 @@ const createChildSchema = z.object({
 // ── GET /api/children ─────────────────────────────────────────────────────────
 router.get('/', requireParentAuth, async (req, res, next) => {
   try {
-    const children = await db('children')
-      .leftJoin('child_devices', function () {
-        this.on('children.id', '=', 'child_devices.child_id')
-          .andOn('child_devices.is_active', '=', db.raw('true'));
-      })
-      .where('children.parent_id', req.parent.id)
-      .select(
-        'children.id',
-        'children.name',
-        'children.avatar_url',
-        'children.avatar_color',
-        'children.created_at',
-        'child_devices.id as device_id',
-        'child_devices.device_name',
-        'child_devices.android_version',
-        'child_devices.last_seen',
-        'child_devices.battery_level as device_battery_level',
-        'child_devices.is_charging as device_is_charging',
-        'child_devices.movement_threshold as movement_threshold',
-      );
+    let children;
+    try {
+      children = await db('children')
+        .leftJoin('child_devices', function () {
+          this.on('children.id', '=', 'child_devices.child_id')
+            .andOn('child_devices.is_active', '=', db.raw('true'));
+        })
+        .where('children.parent_id', req.parent.id)
+        .select(
+          'children.id',
+          'children.name',
+          'children.avatar_url',
+          'children.avatar_color',
+          'children.created_at',
+          'child_devices.id as device_id',
+          'child_devices.device_name',
+          'child_devices.android_version',
+          'child_devices.last_seen',
+          'child_devices.battery_level as device_battery_level',
+          'child_devices.is_charging as device_is_charging',
+          'child_devices.movement_threshold as movement_threshold',
+        );
+    } catch (dbErr) {
+      // Fallback if movement_threshold column has not migrated yet
+      children = await db('children')
+        .leftJoin('child_devices', function () {
+          this.on('children.id', '=', 'child_devices.child_id')
+            .andOn('child_devices.is_active', '=', db.raw('true'));
+        })
+        .where('children.parent_id', req.parent.id)
+        .select(
+          'children.id',
+          'children.name',
+          'children.avatar_url',
+          'children.avatar_color',
+          'children.created_at',
+          'child_devices.id as device_id',
+          'child_devices.device_name',
+          'child_devices.android_version',
+          'child_devices.last_seen',
+          'child_devices.battery_level as device_battery_level',
+          'child_devices.is_charging as device_is_charging',
+        );
+    }
 
     // Enrich with last location
     const enriched = await Promise.all(
@@ -103,9 +127,16 @@ router.get('/:id', requireParentAuth, async (req, res, next) => {
       .first();
     if (!child) throw new AppError('Child not found', 404);
 
-    const devices = await db('child_devices')
-      .where({ child_id: child.id, is_active: true })
-      .select('id', 'device_name', 'android_version', 'last_seen', 'created_at', 'movement_threshold');
+    let devices;
+    try {
+      devices = await db('child_devices')
+        .where({ child_id: child.id, is_active: true })
+        .select('id', 'device_name', 'android_version', 'last_seen', 'created_at', 'movement_threshold');
+    } catch (_e) {
+      devices = await db('child_devices')
+        .where({ child_id: child.id, is_active: true })
+        .select('id', 'device_name', 'android_version', 'last_seen', 'created_at');
+    }
 
     res.json({ child, devices });
   } catch (err) {
