@@ -18,8 +18,8 @@ import { setupWebDashboard } from './web/index.js';
 const app = express();
 const httpServer = http.createServer(app);
 
-// ── Trust Proxy (Required when behind Nginx / reverse proxies) ───────────────
-app.set('trust proxy', true);
+// ── Trust Proxy (Render is 1 hop reverse proxy) ─────────────────────────────
+app.set('trust proxy', 1);
 
 // ── Security middleware ──────────────────────────────────────────────────────
 app.use(helmet({
@@ -37,6 +37,7 @@ const limiter = rateLimit({
   max: isDev ? 10000 : (Number(process.env.RATE_LIMIT_MAX) || 1000),
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
 });
 app.use(limiter);
 
@@ -46,6 +47,7 @@ const authLimiter = rateLimit({
   max: isDev ? 1000 : 100,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: { trustProxy: false },
   message: { error: 'Too many attempts, please try again later.' },
 });
 
