@@ -18,6 +18,7 @@ const locationPointSchema = z.object({
   batteryLevel: z.number().int().min(0).max(100).nullable().optional(),
   isCharging: z.boolean().nullable().optional(),
   recordedAt: z.string(),    // ISO string from device
+  activityType: z.string().optional(),             // still, walking, running, in_vehicle, on_bicycle, unknown
 });
 
 const batchSchema = z.object({
@@ -85,6 +86,7 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
       batteryLevel: latest.batteryLevel,
       isCharging: latest.isCharging,
       recordedAt: latest.recordedAt,
+      activityType: latest.activityType || undefined,
       timestamp: new Date().toISOString(),
     });
 
@@ -111,9 +113,10 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
       batteryLevel: latest.batteryLevel,
       isCharging: latest.isCharging,
       speed: latest.speed != null ? Number(latest.speed) : undefined,
+      activityType: latest.activityType || undefined,
     });
 
-    res.json({ received: points.length });
+    res.json({ received: points.length, movementThreshold: req.device.movement_threshold ?? 20 });
   } catch (err) {
     if (err instanceof z.ZodError) {
       console.error('Batch validation error:', JSON.stringify(err.issues, null, 2), 'body was:', JSON.stringify(req.body, null, 2));
@@ -128,7 +131,7 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
 router.post('/status', requireDeviceAuth, async (req, res, next) => {
   try {
     const { child_id, parent_id } = req.device;
-    const { batteryLevel, isCharging, speed } = req.body;
+    const { batteryLevel, isCharging, speed, activityType } = req.body;
 
     const statusUpdate = { last_seen: new Date() };
     if (batteryLevel != null) {
@@ -155,11 +158,29 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
       batteryLevel: batteryLevel != null ? Number(batteryLevel) : undefined,
       isCharging: isCharging != null ? Boolean(isCharging) : undefined,
       speed: (speed !== undefined && speed !== null) ? Number(speed) : undefined,
+      activityType: activityType || undefined,
       isOnline: true,
       lastSeen: new Date().toISOString(),
     });
 
-    res.json({ ok: true });
+    res.json({ ok: true, movementThreshold: req.device.movement_threshold ?? 20 });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/location/config ──────────────────────────────────────────────────
+// Child device fetches its movement detection configuration
+router.get('/config', requireDeviceAuth, async (req, res, next) => {
+  try {
+    const device = await db('child_devices')
+      .where({ id: req.device.device_id || req.device.id })
+      .select('movement_threshold')
+      .first();
+
+    res.json({
+      movementThreshold: device?.movement_threshold ?? 20,
+    });
   } catch (err) {
     next(err);
   }

@@ -33,6 +33,7 @@ router.get('/', requireParentAuth, async (req, res, next) => {
         'child_devices.last_seen',
         'child_devices.battery_level as device_battery_level',
         'child_devices.is_charging as device_is_charging',
+        'child_devices.movement_threshold as movement_threshold',
       );
 
     // Enrich with last location
@@ -104,7 +105,7 @@ router.get('/:id', requireParentAuth, async (req, res, next) => {
 
     const devices = await db('child_devices')
       .where({ child_id: child.id, is_active: true })
-      .select('id', 'device_name', 'android_version', 'last_seen', 'created_at');
+      .select('id', 'device_name', 'android_version', 'last_seen', 'created_at', 'movement_threshold');
 
     res.json({ child, devices });
   } catch (err) {
@@ -125,4 +126,33 @@ router.delete('/:id', requireParentAuth, async (req, res, next) => {
   }
 });
 
+// ── PUT /api/children/:id/settings ────────────────────────────────────────────
+// Parent updates movement detection settings for a specific child
+router.put('/:id/settings', requireParentAuth, async (req, res, next) => {
+  try {
+    const child = await db('children')
+      .where({ id: req.params.id, parent_id: req.parent.id })
+      .first();
+    if (!child) throw new AppError('Child not found', 404);
+
+    const { movementThreshold } = req.body;
+
+    // Update all active devices for this child
+    if (movementThreshold != null) {
+      const threshold = Number(movementThreshold);
+      if (threshold < 5 || threshold > 200) {
+        return res.status(400).json({ error: 'Movement threshold must be between 5 and 200 meters' });
+      }
+      await db('child_devices')
+        .where({ child_id: child.id, is_active: true })
+        .update({ movement_threshold: threshold });
+    }
+
+    res.json({ ok: true, movementThreshold: movementThreshold ?? 20 });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export default router;
+

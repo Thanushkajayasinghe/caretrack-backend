@@ -52,6 +52,7 @@ export async function requireDeviceAuth(req, res, next) {
         'child_devices.id as id',
         'child_devices.child_id',
         'children.parent_id',
+        'child_devices.movement_threshold',
       )
       .first();
 

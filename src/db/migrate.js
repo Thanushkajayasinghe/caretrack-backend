@@ -74,7 +74,8 @@ export async function runMigrations() {
     await client.query(`
       ALTER TABLE child_devices
       ADD COLUMN IF NOT EXISTS battery_level SMALLINT,
-      ADD COLUMN IF NOT EXISTS is_charging BOOLEAN
+      ADD COLUMN IF NOT EXISTS is_charging BOOLEAN,
+      ADD COLUMN IF NOT EXISTS movement_threshold SMALLINT DEFAULT 20
     `);
 
     // ── Pairing sessions ──────────────────────────────────────────────────────
