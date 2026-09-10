@@ -38,14 +38,14 @@ export async function connectRedis() {
   try {
     const client = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
       maxRetriesPerRequest: 1,
-      connectTimeout: 2000,
+      connectTimeout: 5000,
       lazyConnect: true,
       retryStrategy: () => null, // don't loop retries on fail
     });
 
     const sub = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
       maxRetriesPerRequest: 1,
-      connectTimeout: 2000,
+      connectTimeout: 5000,
       lazyConnect: true,
       retryStrategy: () => null,
     });
