@@ -154,9 +154,9 @@ export function initSocket(httpServer) {
         console.log(`👶 Child ${socket.childId} socket disconnected`);
         setTimeout(async () => {
           try {
-            const dev = await db('child_devices').where({ id: socket.deviceId }).select('last_seen').first();
-            const lastSeenTime = dev?.last_seen ? new Date(dev.last_seen).getTime() : 0;
-            if (Date.now() - lastSeenTime > 120000) {
+            const activeSockets = io.sockets.adapter.rooms.get(`child:${socket.childId}`);
+            if (!activeSockets || activeSockets.size === 0) {
+              const dev = await db('child_devices').where({ id: socket.deviceId }).select('last_seen').first();
               io.to(`parent:${socket.parentId}`).emit('child_status', {
                 childId: socket.childId,
                 isOnline: false,
@@ -164,7 +164,7 @@ export function initSocket(httpServer) {
               });
             }
           } catch (_e) {}
-        }, 60000);
+        }, 10000);
       });
     }
   });

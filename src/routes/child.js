@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../config/db.js';
 import { requireParentAuth } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { getIO } from '../sockets/index.js';
 
 const router = express.Router();
 
@@ -56,10 +57,16 @@ router.get('/', requireParentAuth, async (req, res, next) => {
           }
         }
 
+        let hasLiveSocket = false;
+        try {
+          const io = getIO();
+          hasLiveSocket = Boolean(io?.sockets?.adapter?.rooms?.get(`child:${child.id}`)?.size > 0);
+        } catch (_e) {}
+
         const lastSeenTime = child.last_seen ? new Date(child.last_seen).getTime() : 0;
         const lastLocTime = lastLocation?.recorded_at ? new Date(lastLocation.recorded_at).getTime() : 0;
         const mostRecent = Math.max(lastSeenTime, lastLocTime);
-        const isOnline = mostRecent > 0 && (Date.now() - mostRecent) < 180000; // Online if seen within 3 minutes
+        const isOnline = hasLiveSocket || (mostRecent > 0 && (Date.now() - mostRecent) < 60000);
 
         return { ...child, isOnline, lastLocation: lastLocation || null };
       }),
