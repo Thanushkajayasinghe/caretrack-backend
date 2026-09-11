@@ -120,6 +120,38 @@ function filterPointsForStorage(childId, points) {
   return pointsToStore;
 }
 
+// Track low-battery notification timestamps per child to prevent alert flooding
+// Key: child_id, Value: { lastAlertTime: ms, lastLevel: number }
+const lowBatteryAlertTracker = new Map();
+
+function checkAndEmitLowBatteryAlert(io, parent_id, child_id, batteryLevel, isCharging) {
+  if (batteryLevel == null || isCharging) return;
+  const level = Number(batteryLevel);
+  if (level > 20) return;
+
+  const now = Date.now();
+  const existing = lowBatteryAlertTracker.get(child_id);
+
+  // Alert if:
+  // 1. Never alerted before
+  // 2. More than 30 minutes since last alert
+  // 3. Dropped into critical threshold (<= 10%) while last alert was above 10%
+  const shouldAlert = !existing ||
+    (now - existing.lastAlertTime > 30 * 60 * 1000) ||
+    (level <= 10 && existing.lastLevel > 10);
+
+  if (shouldAlert) {
+    lowBatteryAlertTracker.set(child_id, { lastAlertTime: now, lastLevel: level });
+    io.to(`parent:${parent_id}`).emit('child_battery_low', {
+      childId: child_id,
+      batteryLevel: level,
+      isCharging: false,
+      timestamp: new Date().toISOString(),
+    });
+    console.log(`⚠️ Emitted low battery warning for child ${child_id} (${level}%) to parent ${parent_id}`);
+  }
+}
+
 // ── POST /api/location/batch ──────────────────────────────────────────────────
 // Child device uploads a batch of location points (online flush or live stream)
 router.post('/batch', requireDeviceAuth, async (req, res, next) => {
@@ -214,6 +246,8 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
       activityType: latest.activityType || undefined,
     });
 
+    checkAndEmitLowBatteryAlert(io, parent_id, child_id, latest.batteryLevel, latest.isCharging);
+
     res.json({ received: points.length, movementThreshold: req.device.movement_threshold ?? 20 });
   } catch (err) {
     if (err instanceof z.ZodError) {
@@ -260,6 +294,8 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
       isOnline: true,
       lastSeen: new Date().toISOString(),
     });
+
+    checkAndEmitLowBatteryAlert(io, parent_id, child_id, batteryLevel, isCharging);
 
     res.json({ ok: true, movementThreshold: req.device.movement_threshold ?? 20 });
   } catch (err) {
