@@ -80,6 +80,11 @@ router.get('/', requireParentAuth, async (req, res, next) => {
           if (child.device_is_charging != null) {
             lastLocation.is_charging = child.device_is_charging;
           }
+          // If location fix is older than 45 seconds, instantaneous movement speed is 0
+          const locAge = lastLocation.recorded_at ? Math.abs(Date.now() - new Date(lastLocation.recorded_at).getTime()) : 0;
+          if (locAge > 45000) {
+            lastLocation.speed = 0;
+          }
         }
 
         let hasLiveSocket = false;

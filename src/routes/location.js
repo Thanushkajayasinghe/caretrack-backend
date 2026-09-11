@@ -278,10 +278,12 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
       .where({ id: req.device.device_id || req.device.id })
       .update(statusUpdate);
 
-    // Keep Redis location cache in sync with the new battery status
+    // Keep Redis location cache in sync with the new battery status & speed
     updateCachedDeviceStatus(child_id, {
       batteryLevel,
       isCharging,
+      speed: (speed !== undefined && speed !== null) ? Number(speed) : 0,
+      activityType: activityType || 'still',
       lastSeen: new Date().toISOString(),
     });
 
@@ -341,10 +343,14 @@ router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
       const battery = activeDevice?.battery_level ?? cachedLoc.battery_level;
       const charging = activeDevice?.is_charging ?? cachedLoc.is_charging;
       const lastSeen = activeDevice?.last_seen || cachedLoc.recorded_at;
+      const locAge = cachedLoc.recorded_at ? Math.abs(Date.now() - new Date(cachedLoc.recorded_at).getTime()) : 0;
+      const isStill = cachedLoc.activityType === 'still';
+      const effectiveSpeed = (locAge > 45000 || isStill) ? 0 : (cachedLoc.speed ?? 0);
 
       return res.json({
         location: {
           ...cachedLoc,
+          speed: effectiveSpeed,
           battery_level: battery,
           is_charging: charging,
         },
@@ -372,6 +378,10 @@ router.get('/live/:childId', requireParentAuth, async (req, res, next) => {
       .first();
 
     if (result && activeDevice) {
+      const locAge = result.recorded_at ? Math.abs(Date.now() - new Date(result.recorded_at).getTime()) : 0;
+      if (locAge > 45000) {
+        result.speed = 0;
+      }
       if (activeDevice.battery_level != null) {
         result.battery_level = activeDevice.battery_level;
       }
