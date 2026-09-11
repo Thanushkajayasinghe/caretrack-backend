@@ -4,7 +4,7 @@ import { db } from '../config/db.js';
 import { requireDeviceAuth, requireParentAuth } from '../middleware/auth.js';
 import { getIO } from '../sockets/index.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { cacheLocation, getCachedLatestLocation, getCachedTrail, updateCachedDeviceStatus } from '../services/locationCache.js';
+import { cacheLocation, getCachedLatestLocation, getCachedTrail, updateCachedDeviceStatus, clearCachedTrail } from '../services/locationCache.js';
 
 const router = express.Router();
 
@@ -526,6 +526,8 @@ router.delete('/history', requireParentAuth, async (req, res, next) => {
         .whereNot({ id: latest.id })
         .delete();
     }
+
+    await clearCachedTrail(childId);
 
     res.json({ ok: true, deleted: deletedCount, keptId: latest?.id || null });
   } catch (err) {

@@ -139,9 +139,19 @@ export async function updateCachedDeviceStatus(childId, { batteryLevel, isChargi
   }
 }
 
+export async function clearCachedTrail(childId) {
+  if (!childId) return;
+  try {
+    const redis = getRedis();
+    if (!redis || typeof redis.del !== 'function') return;
+    await redis.del(`${TRAIL_KEY_PREFIX}${childId}`).catch(() => {});
+  } catch (_e) {}
+}
+
 export default {
   cacheLocation,
   getCachedLatestLocation,
   getCachedTrail,
   updateCachedDeviceStatus,
+  clearCachedTrail,
 };
