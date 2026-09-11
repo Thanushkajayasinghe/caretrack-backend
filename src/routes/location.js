@@ -472,14 +472,31 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
       .first();
     if (!child) throw new AppError('Child not found', 404);
 
-    // Fast-path: If querying recent live trail (limit <= 120 and up to current time)
-    const isRecentQuery = Number(limit) <= 120 && (!to || new Date(to) >= new Date(Date.now() - 60000));
-    if (isRecentQuery) {
-      const cachedTrail = await getCachedTrail(childId, Number(limit));
+    // Sync any live trail points from Redis into database so history has full walk fidelity
+    try {
+      const cachedTrail = await getCachedTrail(childId, 500);
       if (cachedTrail && cachedTrail.length > 0) {
-        return res.json({ points: cachedTrail, count: cachedTrail.length, cached: true });
+        const rows = cachedTrail.map((p) => {
+          const recDate = new Date(p.recorded_at || p.recordedAt || Date.now());
+          return {
+            child_id: childId,
+            location: db.raw(`ST_SetSRID(ST_MakePoint(?, ?), 4326)`, [p.lng, p.lat]),
+            accuracy: p.accuracy ?? null,
+            speed: p.speed ?? null,
+            heading: p.heading ?? null,
+            altitude: p.altitude ?? null,
+            battery_level: p.battery_level ?? p.batteryLevel ?? null,
+            is_charging: p.is_charging ?? p.isCharging ?? null,
+            recorded_at: recDate,
+          };
+        });
+
+        await db('locations')
+          .insert(rows)
+          .onConflict(['child_id', 'recorded_at'])
+          .ignore();
       }
-    }
+    } catch (_syncErr) {}
 
     let query = db('locations')
       .where({ child_id: childId })
