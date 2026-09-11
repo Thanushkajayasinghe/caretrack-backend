@@ -59,7 +59,7 @@ function filterPointsForStorage(childId, points) {
 
   for (const p of points) {
     const pTime = new Date(p.recordedAt).getTime();
-    const isMoving = p.speed != null && p.speed > 0.35;
+    const isMoving = p.speed != null && p.speed >= 0.65 && (p.accuracy == null || p.accuracy <= 35);
 
     if (!last) {
       // 1. Initial point for this child -> always persist
@@ -73,19 +73,20 @@ function filterPointsForStorage(childId, points) {
     const angleChange = calculateHeadingDelta(last.heading, p.heading);
     const stateChanged = last.isMoving !== isMoving;
 
+    // Reject micro-wanderings (indoor GPS jitter < 25m while essentially still)
+    if (dist < 25.0 && (!isMoving || (p.speed != null && p.speed < 1.4))) {
+      continue;
+    }
+
     // 2. Instant Stop or Start Transition -> always persist
-    if (stateChanged || (!isMoving && last.speed > 0.35)) {
+    if (stateChanged || (!isMoving && last.speed > 0.65)) {
       pointsToStore.push(p);
       last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
       continue;
     }
 
-    // 3. Stationary / Still: Only persist heartbeat every 45s (prevent database clutter while sitting still)
+    // 3. Stationary / Still: Do not flood database with duplicate resting fixes
     if (!isMoving) {
-      if (dt >= 45) {
-        pointsToStore.push(p);
-        last = { lat: p.lat, lng: p.lng, speed: 0, heading: p.heading ?? 0, time: pTime, isMoving: false };
-      }
       continue;
     }
 
@@ -486,6 +487,37 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
 
     const points = await query;
     res.json({ points, count: points.length });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── DELETE /api/location/history ──────────────────────────────────────────────
+// Parent: prune false jitter points and keep the latest resting anchor point
+router.delete('/history', requireParentAuth, async (req, res, next) => {
+  try {
+    const { childId } = req.query;
+    if (!childId) throw new AppError('childId required', 400);
+
+    const child = await db('children')
+      .where({ id: childId, parent_id: req.parent.id })
+      .first();
+    if (!child) throw new AppError('Child not found', 404);
+
+    const latest = await db('locations')
+      .where({ child_id: childId })
+      .orderBy('recorded_at', 'desc')
+      .first();
+
+    let deletedCount = 0;
+    if (latest) {
+      deletedCount = await db('locations')
+        .where({ child_id: childId })
+        .whereNot({ id: latest.id })
+        .delete();
+    }
+
+    res.json({ ok: true, deleted: deletedCount, keptId: latest?.id || null });
   } catch (err) {
     next(err);
   }
