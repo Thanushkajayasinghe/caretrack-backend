@@ -59,7 +59,14 @@ function filterPointsForStorage(childId, points) {
 
   for (const p of points) {
     const pTime = new Date(p.recordedAt).getTime();
-    const isMoving = p.speed != null && p.speed >= 0.65 && (p.accuracy == null || p.accuracy <= 35);
+    const isStill = p.activityType === 'still' || (p.speed != null && p.speed < 0.35);
+    const isMoving = !isStill && (
+      p.activityType === 'walking' ||
+      p.activityType === 'running' ||
+      p.activityType === 'in_vehicle' ||
+      p.activityType === 'on_bicycle' ||
+      (p.speed != null && p.speed >= 0.5)
+    );
 
     if (!last) {
       // 1. Initial point for this child -> always persist
@@ -73,19 +80,14 @@ function filterPointsForStorage(childId, points) {
     const angleChange = calculateHeadingDelta(last.heading, p.heading);
     const stateChanged = last.isMoving !== isMoving;
 
-    // Reject micro-wanderings (indoor GPS jitter < 25m while essentially still)
-    if (dist < 25.0 && (!isMoving || (p.speed != null && p.speed < 1.4))) {
-      continue;
-    }
-
     // 2. Instant Stop or Start Transition -> always persist
-    if (stateChanged || (!isMoving && last.speed > 0.65)) {
+    if (stateChanged || (!isMoving && last.speed > 0.5)) {
       pointsToStore.push(p);
       last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
       continue;
     }
 
-    // 3. Stationary / Still: Do not flood database with duplicate resting fixes
+    // 3. Stationary / Still: Reject table jitter (< 15m) and avoid flooding DB with resting points
     if (!isMoving) {
       continue;
     }
@@ -95,19 +97,22 @@ function filterPointsForStorage(childId, points) {
 
     if (isVehicle) {
       // Driving mode:
-      // A. Corner / Curve: Heading changed >= 15 deg and moved >= 25m (preserves road turns)
-      const isTurn = angleChange >= 15 && dist >= 25;
-      // B. Straight road: Traveled >= 90m or >= 12 seconds
-      const isStraightWaypoint = dist >= 90 || dt >= 12;
+      // A. Corner / Curve: Heading changed >= 15 deg and moved >= 20m (preserves road turns)
+      const isTurn = angleChange >= 15 && dist >= 20;
+      // B. Straight road: Traveled >= 80m or >= 10 seconds
+      const isStraightWaypoint = dist >= 80 || dt >= 10;
 
       if (isTurn || isStraightWaypoint) {
         pointsToStore.push(p);
         last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving: true };
       }
     } else {
-      // Walking / Pedestrian mode:
-      // Keep rich fidelity: save every 10m or 8 seconds
-      if (dist >= 10 || dt >= 8) {
+      // Walking / Pedestrian mode (Google Fit / Pedometer walk):
+      // Keep rich fidelity: save every 5m, every turn >= 20 deg (if moved >= 4m), or every 6 seconds
+      const isWalkTurn = angleChange >= 20 && dist >= 4.0;
+      const isWalkProgression = dist >= 5.0 || dt >= 6.0;
+
+      if (isWalkTurn || isWalkProgression) {
         pointsToStore.push(p);
         last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving: true };
       }
