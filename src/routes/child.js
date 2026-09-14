@@ -68,7 +68,7 @@ router.get('/', requireParentAuth, async (req, res, next) => {
           .select(
             db.raw('ST_Y(location::geometry) as lat'),
             db.raw('ST_X(location::geometry) as lng'),
-            'speed', 'heading', 'battery_level', 'is_charging', 'recorded_at',
+            'accuracy', 'speed', 'heading', 'battery_level', 'is_charging', 'recorded_at',
           )
           .orderBy('recorded_at', 'desc')
           .first();

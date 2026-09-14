@@ -463,7 +463,7 @@ router.get('/trail/:childId', requireParentAuth, async (req, res, next) => {
 // Parent: get location history for a child over a time range
 router.get('/history', requireParentAuth, async (req, res, next) => {
   try {
-    const { childId, from, to, limit = 2000 } = req.query;
+    const { childId, from, to, limit = 2000, order = 'asc' } = req.query;
 
     if (!childId) throw new AppError('childId required', 400);
 
@@ -472,32 +472,36 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
       .first();
     if (!child) throw new AppError('Child not found', 404);
 
-    // Sync any live trail points from Redis into database so history has full walk fidelity
+    // Sync any live trail points from Redis into database using smart trajectory filter
     try {
       const cachedTrail = await getCachedTrail(childId, 500);
       if (cachedTrail && cachedTrail.length > 0) {
-        const rows = cachedTrail.map((p) => {
-          const recDate = new Date(p.recorded_at || p.recordedAt || Date.now());
-          return {
-            child_id: childId,
-            location: db.raw(`ST_SetSRID(ST_MakePoint(?, ?), 4326)`, [p.lng, p.lat]),
-            accuracy: p.accuracy ?? null,
-            speed: p.speed ?? null,
-            heading: p.heading ?? null,
-            altitude: p.altitude ?? null,
-            battery_level: p.battery_level ?? p.batteryLevel ?? null,
-            is_charging: p.is_charging ?? p.isCharging ?? null,
-            recorded_at: recDate,
-          };
-        });
+        const pointsToStore = filterPointsForStorage(childId, cachedTrail);
+        if (pointsToStore.length > 0) {
+          const rows = pointsToStore.map((p) => {
+            const recDate = new Date(p.recorded_at || p.recordedAt || Date.now());
+            return {
+              child_id: childId,
+              location: db.raw(`ST_SetSRID(ST_MakePoint(?, ?), 4326)`, [p.lng, p.lat]),
+              accuracy: p.accuracy ?? null,
+              speed: p.speed ?? null,
+              heading: p.heading ?? null,
+              altitude: p.altitude ?? null,
+              battery_level: p.battery_level ?? p.batteryLevel ?? null,
+              is_charging: p.is_charging ?? p.isCharging ?? null,
+              recorded_at: recDate,
+            };
+          });
 
-        await db('locations')
-          .insert(rows)
-          .onConflict(['child_id', 'recorded_at'])
-          .ignore();
+          await db('locations')
+            .insert(rows)
+            .onConflict(['child_id', 'recorded_at'])
+            .ignore();
+        }
       }
     } catch (_syncErr) {}
 
+    const sortOrder = (order && order.toLowerCase() === 'desc') ? 'desc' : 'asc';
     let query = db('locations')
       .where({ child_id: childId })
       .where(function() {
@@ -510,14 +514,18 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
         'accuracy', 'speed', 'heading', 'altitude',
         'battery_level', 'is_charging', 'recorded_at',
       )
-      .orderBy('recorded_at', 'asc')
+      .orderBy('recorded_at', sortOrder)
       .limit(Number(limit));
 
 
     if (from) query = query.where('recorded_at', '>=', new Date(from));
     if (to) query = query.where('recorded_at', '<=', new Date(to));
 
-    const points = await query;
+    let points = await query;
+    // When querying most recent points (order=desc), reverse to return them in chronological order
+    if (sortOrder === 'desc') {
+      points = points.reverse();
+    }
     res.json({ points, count: points.length });
   } catch (err) {
     next(err);
