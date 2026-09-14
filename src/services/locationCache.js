@@ -104,7 +104,7 @@ export async function getCachedTrail(childId, limit = 100) {
  * Update cached battery & charging state in the child's latest location cache.
  * Ensures status heartbeats immediately reflect in Redis without waiting for a new GPS fix.
  */
-export async function updateCachedDeviceStatus(childId, { batteryLevel, isCharging, lastSeen, speed, activityType } = {}) {
+export async function updateCachedDeviceStatus(childId, { batteryLevel, isCharging, lastSeen, speed, activityType, heading } = {}) {
   if (!childId) return;
 
   try {
@@ -127,6 +127,9 @@ export async function updateCachedDeviceStatus(childId, { batteryLevel, isChargi
     }
     if (activityType) {
       data.activityType = activityType;
+    }
+    if (heading !== undefined && heading !== null) {
+      data.heading = Number(heading);
     }
     if (lastSeen) {
       data.last_seen = lastSeen;

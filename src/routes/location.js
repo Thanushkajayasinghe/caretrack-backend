@@ -269,7 +269,7 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
 router.post('/status', requireDeviceAuth, async (req, res, next) => {
   try {
     const { child_id, parent_id } = req.device;
-    const { batteryLevel, isCharging, speed, activityType } = req.body;
+    const { batteryLevel, isCharging, speed, activityType, heading } = req.body;
 
     const statusUpdate = { last_seen: new Date() };
     if (batteryLevel != null) {
@@ -283,12 +283,13 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
       .where({ id: req.device.device_id || req.device.id })
       .update(statusUpdate);
 
-    // Keep Redis location cache in sync with the new battery status & speed
+    // Keep Redis location cache in sync with the new battery status, speed & heading
     updateCachedDeviceStatus(child_id, {
       batteryLevel,
       isCharging,
       speed: (speed !== undefined && speed !== null) ? Number(speed) : 0,
       activityType: activityType || 'still',
+      heading: (heading !== undefined && heading !== null) ? Number(heading) : undefined,
       lastSeen: new Date().toISOString(),
     });
 
@@ -299,6 +300,7 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
       isCharging: isCharging != null ? Boolean(isCharging) : undefined,
       speed: (speed !== undefined && speed !== null) ? Number(speed) : undefined,
       activityType: activityType || undefined,
+      heading: (heading !== undefined && heading !== null) ? Number(heading) : undefined,
       isOnline: true,
       lastSeen: new Date().toISOString(),
     });
