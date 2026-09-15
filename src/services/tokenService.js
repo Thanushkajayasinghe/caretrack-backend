@@ -4,8 +4,8 @@ import { db } from '../config/db.js';
 
 const ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 const REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
-const ACCESS_EXPIRES = process.env.JWT_ACCESS_EXPIRES || (process.env.NODE_ENV === 'production' ? '15m' : '7d');
-const REFRESH_EXPIRES_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const ACCESS_EXPIRES = process.env.JWT_ACCESS_EXPIRES || '90d';
+const REFRESH_EXPIRES_MS = 180 * 24 * 60 * 60 * 1000; // 180 days (6 months)
 
 export function generateAccessToken(payload) {
   return jwt.sign(payload, ACCESS_SECRET, { expiresIn: ACCESS_EXPIRES });
@@ -34,7 +34,26 @@ export async function rotateRefreshToken(oldToken, parentId) {
     .where('expires_at', '>', new Date())
     .first();
 
-  if (!existing) return null;
+  if (!existing) {
+    // Grace period check: If this token was revoked in the last 60 seconds (concurrent requests),
+    // find and return the current active refresh token instead of failing
+    const recentlyRevoked = await db('refresh_tokens')
+      .where({ token_hash: oldHash, parent_id: parentId, revoked: true })
+      .first();
+
+    if (recentlyRevoked) {
+      const latestActive = await db('refresh_tokens')
+        .where({ parent_id: parentId, revoked: false })
+        .where('expires_at', '>', new Date())
+        .orderBy('created_at', 'desc')
+        .first();
+
+      if (latestActive) {
+        return 'REUSE_ACTIVE';
+      }
+    }
+    return null;
+  }
 
   // Revoke old token
   await db('refresh_tokens').where({ id: existing.id }).update({ revoked: true });

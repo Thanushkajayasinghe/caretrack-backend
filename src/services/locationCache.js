@@ -26,6 +26,7 @@ export async function cacheLocation(childId, data) {
       battery_level: data.batteryLevel ?? data.battery_level ?? null,
       is_charging: data.isCharging ?? data.is_charging ?? null,
       recorded_at: data.recordedAt || data.recorded_at || new Date().toISOString(),
+      activityType: data.activityType || undefined,
       cached_at: new Date().toISOString(),
     };
 

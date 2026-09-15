@@ -101,8 +101,11 @@ router.post('/refresh', async (req, res, next) => {
     const { refreshToken, parentId } = req.body;
     if (!refreshToken || !parentId) throw new AppError('Missing token or parentId', 400);
 
-    const newRefreshToken = await rotateRefreshToken(refreshToken, parentId);
+    let newRefreshToken = await rotateRefreshToken(refreshToken, parentId);
     if (!newRefreshToken) throw new AppError('Invalid or expired refresh token', 401);
+    if (newRefreshToken === 'REUSE_ACTIVE') {
+      newRefreshToken = refreshToken;
+    }
 
     const parent = await db('parents').where({ id: parentId }).first();
     if (!parent) throw new AppError('Parent not found', 404);

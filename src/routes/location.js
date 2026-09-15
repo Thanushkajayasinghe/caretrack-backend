@@ -55,17 +55,23 @@ const lastPersistedLocationMap = new Map();
  */
 function filterPointsForStorage(childId, points) {
   let last = lastPersistedLocationMap.get(childId);
+  if (last && (isNaN(last.time) || last.time == null)) {
+    last = null;
+    lastPersistedLocationMap.delete(childId);
+  }
   const pointsToStore = [];
 
   for (const p of points) {
-    const pTime = new Date(p.recordedAt).getTime();
-    const isStill = p.activityType === 'still' || (p.speed != null && p.speed < 0.35);
+    const pTimeStr = p.recordedAt || p.recorded_at;
+    const pTime = pTimeStr ? new Date(pTimeStr).getTime() : Date.now();
+    if (isNaN(pTime)) continue;
+    const isStill = p.activityType === 'still' || (p.speed != null && p.speed < 0.45);
     const isMoving = !isStill && (
       p.activityType === 'walking' ||
       p.activityType === 'running' ||
       p.activityType === 'in_vehicle' ||
       p.activityType === 'on_bicycle' ||
-      (p.speed != null && p.speed >= 0.5)
+      (p.speed != null && p.speed >= 0.7)
     );
 
     if (!last) {
@@ -80,27 +86,27 @@ function filterPointsForStorage(childId, points) {
     const angleChange = calculateHeadingDelta(last.heading, p.heading);
     const stateChanged = last.isMoving !== isMoving;
 
-    // 2. Instant Stop or Start Transition -> always persist
-    if (stateChanged || (!isMoving && last.speed > 0.5)) {
+    // 2. Instant Stop or Start Transition -> persist only if genuinely moved or state changed
+    if (stateChanged || (!isMoving && last.speed > 0.5 && dist >= 5.0)) {
       pointsToStore.push(p);
       last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
       continue;
     }
 
-    // 3. Stationary / Still: Reject table jitter (< 15m) and avoid flooding DB with resting points
-    if (!isMoving) {
+    // 3. Stationary / Still: Reject table jitter and avoid flooding DB with resting points
+    if (!isMoving || dist < 3.0) {
       continue;
     }
 
-    // 4. Moving - Distinguish Driving (> 20 km/h = 5.5 m/s) vs Walking / Cycling
-    const isVehicle = (p.speed != null && p.speed >= 5.5) || p.activityType === 'in_vehicle';
+    // 4. Moving - Distinguish Driving (> 18 km/h = 5.0 m/s) vs Walking / Cycling
+    const isVehicle = (p.speed != null && p.speed >= 5.0) || p.activityType === 'in_vehicle';
 
     if (isVehicle) {
       // Driving mode:
       // A. Corner / Curve: Heading changed >= 15 deg and moved >= 20m (preserves road turns)
       const isTurn = angleChange >= 15 && dist >= 20;
-      // B. Straight road: Traveled >= 80m or >= 10 seconds
-      const isStraightWaypoint = dist >= 80 || dt >= 10;
+      // B. Straight road: Traveled >= 80m or >= 10 seconds with displacement >= 30m
+      const isStraightWaypoint = dist >= 80 || (dt >= 10 && dist >= 30);
 
       if (isTurn || isStraightWaypoint) {
         pointsToStore.push(p);
@@ -108,9 +114,10 @@ function filterPointsForStorage(childId, points) {
       }
     } else {
       // Walking / Pedestrian mode (Google Fit / Pedometer walk):
-      // Keep rich fidelity: save every 5m, every turn >= 20 deg (if moved >= 4m), or every 6 seconds
-      const isWalkTurn = angleChange >= 20 && dist >= 4.0;
-      const isWalkProgression = dist >= 5.0 || dt >= 6.0;
+      // Require genuine physical displacement (dist >= 8m, or dist >= 4m with dt >= 10s)
+      // Never save points if dist < 3.0m (table drift)!
+      const isWalkTurn = angleChange >= 20 && dist >= 5.0;
+      const isWalkProgression = dist >= 8.0 || (dist >= 4.0 && dt >= 10.0);
 
       if (isWalkTurn || isWalkProgression) {
         pointsToStore.push(p);
@@ -202,7 +209,7 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
       const deviceCreated = req.device?.created_at ? new Date(req.device.created_at) : null;
 
       const rows = pointsToStore.map((p) => {
-        let recDate = new Date(p.recordedAt);
+        let recDate = new Date(p.recordedAt || p.recorded_at || Date.now());
         if (isNaN(recDate.getTime()) || recDate > now) {
           recDate = now;
         }
@@ -473,6 +480,10 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
       .where({ id: childId, parent_id: req.parent.id })
       .first();
     if (!child) throw new AppError('Child not found', 404);
+
+    res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
 
     // Sync any live trail points from Redis into database using smart trajectory filter
     try {
