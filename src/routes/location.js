@@ -198,8 +198,8 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
     // Cache latest point and active trail into Redis (safe error handling)
     cacheLocation(child_id, latest);
 
-    // 2. DATABASE PERSISTENCE: Apply smart trajectory filter (reduces highway clutter by 75-85%)
-    const pointsToStore = filterPointsForStorage(child_id, validPoints);
+    // 2. DATABASE PERSISTENCE: Save all incoming raw GPS points directly to DB
+    const pointsToStore = validPoints;
 
     if (pointsToStore.length > 0) {
       const now = new Date();
@@ -492,7 +492,7 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
     let query = db('locations')
       .where({ child_id: childId })
       .where(function() {
-        this.whereNull('accuracy').orWhere('accuracy', '<=', 80);
+        this.whereNull('accuracy').orWhere('accuracy', '<=', 120);
       })
       .select(
         'id',
