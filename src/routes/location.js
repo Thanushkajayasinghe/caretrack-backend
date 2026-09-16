@@ -53,15 +53,20 @@ const lastPersistedLocationMap = new Map();
  * Eliminates redundant collinear points during driving while preserving 100% of turns and stops.
  * Note: Real-time WebSocket streaming to parents is NEVER filtered and runs at 100% live frequency!
  */
-function filterPointsForStorage(childId, points) {
-  let last = lastPersistedLocationMap.get(childId);
+function filterPointsForStorage(childId, points, isLiveStream = true) {
+  let last = isLiveStream ? lastPersistedLocationMap.get(childId) : null;
   if (last && (isNaN(last.time) || last.time == null)) {
     last = null;
-    lastPersistedLocationMap.delete(childId);
+    if (isLiveStream) lastPersistedLocationMap.delete(childId);
   }
   const pointsToStore = [];
 
   for (const p of points) {
+    if (p.lat == null || p.lng == null) continue;
+    const lat = Number(p.lat);
+    const lng = Number(p.lng);
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) continue;
+
     const pTimeStr = p.recordedAt || p.recorded_at;
     const pTime = pTimeStr ? new Date(pTimeStr).getTime() : Date.now();
     if (isNaN(pTime)) continue;
@@ -76,20 +81,20 @@ function filterPointsForStorage(childId, points) {
 
     if (!last) {
       // 1. Initial point for this child -> always persist
-      pointsToStore.push(p);
-      last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
+      pointsToStore.push({ ...p, lat, lng });
+      last = { lat, lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
       continue;
     }
 
-    const dist = haversineDistanceMeters(last.lat, last.lng, p.lat, p.lng);
+    const dist = haversineDistanceMeters(last.lat, last.lng, lat, lng);
     const dt = Math.max(0, (pTime - last.time) / 1000);
     const angleChange = calculateHeadingDelta(last.heading, p.heading);
     const stateChanged = last.isMoving !== isMoving;
 
     // 2. Instant Stop or Start Transition -> persist only if genuinely moved or state changed
     if (stateChanged || (!isMoving && last.speed > 0.5 && dist >= 5.0)) {
-      pointsToStore.push(p);
-      last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
+      pointsToStore.push({ ...p, lat, lng });
+      last = { lat, lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
       continue;
     }
 
@@ -106,12 +111,12 @@ function filterPointsForStorage(childId, points) {
     if (isTurn || isProgression) {
       // Sanitize impossible GPS speed spikes (> 180 km/h)
       const cleanSpeed = (p.speed != null && p.speed <= 50.0) ? p.speed : 0;
-      pointsToStore.push({ ...p, speed: cleanSpeed });
-      last = { lat: p.lat, lng: p.lng, speed: cleanSpeed, heading: p.heading ?? 0, time: pTime, isMoving: true };
+      pointsToStore.push({ ...p, lat, lng, speed: cleanSpeed });
+      last = { lat, lng, speed: cleanSpeed, heading: p.heading ?? 0, time: pTime, isMoving: true };
     }
   }
 
-  if (last) {
+  if (isLiveStream && last) {
     lastPersistedLocationMap.set(childId, last);
   }
 
@@ -472,32 +477,40 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
 
     // Sync any live trail points from Redis into database using smart trajectory filter
     try {
-      const cachedTrail = await getCachedTrail(childId, 500);
+      const cachedTrail = await getCachedTrail(childId, 100);
       if (cachedTrail && cachedTrail.length > 0) {
-        const pointsToStore = filterPointsForStorage(childId, cachedTrail);
+        // Use isLiveStream = false so we NEVER mutate or corrupt the live streaming engine state
+        const pointsToStore = filterPointsForStorage(childId, cachedTrail, false);
         if (pointsToStore.length > 0) {
-          const rows = pointsToStore.map((p) => {
-            const recDate = new Date(p.recorded_at || p.recordedAt || Date.now());
-            return {
-              child_id: childId,
-              location: db.raw(`ST_SetSRID(ST_MakePoint(?, ?), 4326)`, [p.lng, p.lat]),
-              accuracy: p.accuracy ?? null,
-              speed: p.speed ?? null,
-              heading: p.heading ?? null,
-              altitude: p.altitude ?? null,
-              battery_level: p.battery_level ?? p.batteryLevel ?? null,
-              is_charging: p.is_charging ?? p.isCharging ?? null,
-              recorded_at: recDate,
-            };
-          });
+          const rows = pointsToStore
+            .filter((p) => p.lat != null && p.lng != null && !isNaN(Number(p.lat)) && !isNaN(Number(p.lng)))
+            .map((p) => {
+              let recDate = new Date(p.recorded_at || p.recordedAt || Date.now());
+              if (isNaN(recDate.getTime())) recDate = new Date();
+              return {
+                child_id: childId,
+                location: db.raw(`ST_SetSRID(ST_MakePoint(?, ?), 4326)`, [Number(p.lng), Number(p.lat)]),
+                accuracy: p.accuracy != null && !isNaN(Number(p.accuracy)) ? Number(p.accuracy) : null,
+                speed: p.speed != null && !isNaN(Number(p.speed)) ? Number(p.speed) : null,
+                heading: p.heading != null && !isNaN(Number(p.heading)) ? Number(p.heading) : null,
+                altitude: p.altitude != null && !isNaN(Number(p.altitude)) ? Number(p.altitude) : null,
+                battery_level: p.battery_level ?? p.batteryLevel ?? null,
+                is_charging: p.is_charging ?? p.isCharging ?? null,
+                recorded_at: recDate,
+              };
+            });
 
-          await db('locations')
-            .insert(rows)
-            .onConflict(['child_id', 'recorded_at'])
-            .ignore();
+          if (rows.length > 0) {
+            await db('locations')
+              .insert(rows)
+              .onConflict(['child_id', 'recorded_at'])
+              .ignore();
+          }
         }
       }
-    } catch (_syncErr) {}
+    } catch (_syncErr) {
+      console.warn('⚠️ [History Sync] Redis trail sync skipped:', _syncErr.message);
+    }
 
     const sortOrder = (order && order.toLowerCase() === 'desc') ? 'desc' : 'asc';
     let query = db('locations')
