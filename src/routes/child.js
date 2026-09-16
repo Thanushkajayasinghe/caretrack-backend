@@ -4,6 +4,7 @@ import { db } from '../config/db.js';
 import { requireParentAuth } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { getIO } from '../sockets/index.js';
+import { getCachedLatestLocation } from '../services/locationCache.js';
 
 const router = express.Router();
 
@@ -73,17 +74,36 @@ router.get('/', requireParentAuth, async (req, res, next) => {
           .orderBy('recorded_at', 'desc')
           .first();
 
-        if (lastLocation) {
+        let effectiveLocation = lastLocation;
+        if (!effectiveLocation) {
+          try {
+            const cached = await getCachedLatestLocation(child.id);
+            if (cached && cached.lat != null && cached.lng != null) {
+              effectiveLocation = {
+                lat: cached.lat,
+                lng: cached.lng,
+                accuracy: cached.accuracy ?? null,
+                speed: cached.speed ?? 0,
+                heading: cached.heading ?? null,
+                battery_level: cached.battery_level ?? child.device_battery_level,
+                is_charging: cached.is_charging ?? child.device_is_charging,
+                recorded_at: cached.recorded_at,
+              };
+            }
+          } catch (_e) {}
+        }
+
+        if (effectiveLocation) {
           if (child.device_battery_level != null) {
-            lastLocation.battery_level = child.device_battery_level;
+            effectiveLocation.battery_level = child.device_battery_level;
           }
           if (child.device_is_charging != null) {
-            lastLocation.is_charging = child.device_is_charging;
+            effectiveLocation.is_charging = child.device_is_charging;
           }
           // If location fix is older than 45 seconds, instantaneous movement speed is 0
-          const locAge = lastLocation.recorded_at ? Math.abs(Date.now() - new Date(lastLocation.recorded_at).getTime()) : 0;
+          const locAge = effectiveLocation.recorded_at ? Math.abs(Date.now() - new Date(effectiveLocation.recorded_at).getTime()) : 0;
           if (locAge > 45000) {
-            lastLocation.speed = 0;
+            effectiveLocation.speed = 0;
           }
         }
 
@@ -94,11 +114,11 @@ router.get('/', requireParentAuth, async (req, res, next) => {
         } catch (_e) {}
 
         const lastSeenTime = child.last_seen ? new Date(child.last_seen).getTime() : 0;
-        const lastLocTime = lastLocation?.recorded_at ? new Date(lastLocation.recorded_at).getTime() : 0;
+        const lastLocTime = effectiveLocation?.recorded_at ? new Date(effectiveLocation.recorded_at).getTime() : 0;
         const mostRecent = Math.max(lastSeenTime, lastLocTime);
         const isOnline = hasLiveSocket || (mostRecent > 0 && (Date.now() - mostRecent) < 60000);
 
-        return { ...child, isOnline, lastLocation: lastLocation || null };
+        return { ...child, isOnline, lastLocation: effectiveLocation || null };
       }),
     );
 
