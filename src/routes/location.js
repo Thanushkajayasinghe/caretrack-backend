@@ -98,31 +98,16 @@ function filterPointsForStorage(childId, points) {
       continue;
     }
 
-    // 4. Moving - Distinguish Driving (> 18 km/h = 5.0 m/s) vs Walking / Cycling
-    const isVehicle = (p.speed != null && p.speed >= 5.0) || p.activityType === 'in_vehicle';
+    // 4. Moving: Save real physical progression (dist >= 4.0m or turn angleChange >= 10 deg)
+    // Ensures vehicle tracks smoothly along road curves without gaps across bridges or corners!
+    const isTurn = angleChange >= 10 && dist >= 3.0;
+    const isProgression = dist >= 4.0 || (dt >= 4.0 && dist >= 2.5);
 
-    if (isVehicle) {
-      // Driving mode:
-      // A. Corner / Curve: Heading changed >= 15 deg and moved >= 20m (preserves road turns)
-      const isTurn = angleChange >= 15 && dist >= 20;
-      // B. Straight road: Traveled >= 80m or >= 10 seconds with displacement >= 30m
-      const isStraightWaypoint = dist >= 80 || (dt >= 10 && dist >= 30);
-
-      if (isTurn || isStraightWaypoint) {
-        pointsToStore.push(p);
-        last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving: true };
-      }
-    } else {
-      // Walking / Pedestrian mode (Google Fit / Pedometer walk):
-      // Require genuine physical displacement (dist >= 8m, or dist >= 4m with dt >= 10s)
-      // Never save points if dist < 3.0m (table drift)!
-      const isWalkTurn = angleChange >= 20 && dist >= 5.0;
-      const isWalkProgression = dist >= 8.0 || (dist >= 4.0 && dt >= 10.0);
-
-      if (isWalkTurn || isWalkProgression) {
-        pointsToStore.push(p);
-        last = { lat: p.lat, lng: p.lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving: true };
-      }
+    if (isTurn || isProgression) {
+      // Sanitize impossible GPS speed spikes (> 180 km/h)
+      const cleanSpeed = (p.speed != null && p.speed <= 50.0) ? p.speed : 0;
+      pointsToStore.push({ ...p, speed: cleanSpeed });
+      last = { lat: p.lat, lng: p.lng, speed: cleanSpeed, heading: p.heading ?? 0, time: pTime, isMoving: true };
     }
   }
 
