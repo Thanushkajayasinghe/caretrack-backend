@@ -80,8 +80,13 @@ function filterPointsForStorage(childId, points, isLiveStream = true) {
     );
 
     if (!last) {
-      // 1. Initial point for this child -> always persist
-      pointsToStore.push({ ...p, lat, lng });
+      // 1. Initial point for this child (in-memory state cold-start or backend restart):
+      // Only persist if the device is actually moving. If stationary, we just seed the
+      // in-memory tracking state so subsequent movement points have a reference baseline.
+      // This prevents stationary heartbeats after backend restarts from bloating the DB.
+      if (isMoving) {
+        pointsToStore.push({ ...p, lat, lng });
+      }
       last = { lat, lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
       continue;
     }
@@ -91,8 +96,10 @@ function filterPointsForStorage(childId, points, isLiveStream = true) {
     const angleChange = calculateHeadingDelta(last.heading, p.heading);
     const stateChanged = last.isMoving !== isMoving;
 
-    // 2. Instant Stop or Start Transition -> persist only if genuinely moved or state changed
-    if (stateChanged || (!isMoving && last.speed > 0.5 && dist >= 5.0)) {
+    // 2. Instant Stop or Start Transition -> persist only when transitioning between moving/stationary
+    // IMPORTANT: still -> still is NOT a real state change even if stateChanged would be true
+    // due to field differences. We skip it to prevent stationary anchor refinement from bloating the DB.
+    if (stateChanged && (last.isMoving || isMoving)) {
       pointsToStore.push({ ...p, lat, lng });
       last = { lat, lng, speed: p.speed ?? 0, heading: p.heading ?? 0, time: pTime, isMoving };
       continue;
@@ -162,8 +169,8 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
     const { points } = batchSchema.parse(req.body);
     const { child_id, parent_id } = req.device;
 
-    // Filter out points with accuracy > 80m to reject coarse cell-tower triangulations
-    const validPoints = points.filter((p) => p.accuracy == null || p.accuracy <= 80);
+    // Filter out points with accuracy > 120m to reject coarse cell-tower triangulations
+    const validPoints = points.filter((p) => p.accuracy == null || p.accuracy <= 120);
     if (validPoints.length === 0) {
       return res.status(200).json({ saved: 0, status: 'ignored_low_accuracy' });
     }
@@ -475,42 +482,11 @@ router.get('/history', requireParentAuth, async (req, res, next) => {
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
 
-    // Sync any live trail points from Redis into database using smart trajectory filter
-    try {
-      const cachedTrail = await getCachedTrail(childId, 100);
-      if (cachedTrail && cachedTrail.length > 0) {
-        // Use isLiveStream = false so we NEVER mutate or corrupt the live streaming engine state
-        const pointsToStore = filterPointsForStorage(childId, cachedTrail, false);
-        if (pointsToStore.length > 0) {
-          const rows = pointsToStore
-            .filter((p) => p.lat != null && p.lng != null && !isNaN(Number(p.lat)) && !isNaN(Number(p.lng)))
-            .map((p) => {
-              let recDate = new Date(p.recorded_at || p.recordedAt || Date.now());
-              if (isNaN(recDate.getTime())) recDate = new Date();
-              return {
-                child_id: childId,
-                location: db.raw(`ST_SetSRID(ST_MakePoint(?, ?), 4326)`, [Number(p.lng), Number(p.lat)]),
-                accuracy: p.accuracy != null && !isNaN(Number(p.accuracy)) ? Number(p.accuracy) : null,
-                speed: p.speed != null && !isNaN(Number(p.speed)) ? Number(p.speed) : null,
-                heading: p.heading != null && !isNaN(Number(p.heading)) ? Number(p.heading) : null,
-                altitude: p.altitude != null && !isNaN(Number(p.altitude)) ? Number(p.altitude) : null,
-                battery_level: p.battery_level ?? p.batteryLevel ?? null,
-                is_charging: p.is_charging ?? p.isCharging ?? null,
-                recorded_at: recDate,
-              };
-            });
-
-          if (rows.length > 0) {
-            await db('locations')
-              .insert(rows)
-              .onConflict(['child_id', 'recorded_at'])
-              .ignore();
-          }
-        }
-      }
-    } catch (_syncErr) {
-      console.warn('⚠️ [History Sync] Redis trail sync skipped:', _syncErr.message);
-    }
+    // NOTE: The /batch endpoint already persists all meaningful location points in real-time
+    // with the proper trajectory-filter state context. We intentionally do NOT sync the Redis
+    // trail into the DB here — doing so with a fresh state context (isLiveStream=false) caused
+    // stationary anchor points to be repeatedly re-inserted as "first point" records every time
+    // the parent viewed history, creating spurious history bloat while the child was stationary.
 
     const sortOrder = (order && order.toLowerCase() === 'desc') ? 'desc' : 'asc';
     let query = db('locations')
