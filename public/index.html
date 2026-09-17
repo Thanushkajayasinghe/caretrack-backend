@@ -1636,6 +1636,8 @@
         let activity = last.activity_type || null;
         if (!speedVal || speedVal < 1.0) {
           activity = 'still';
+        } else if (activity === 'running' && speedVal < 7.0) {
+          activity = 'walking';
         } else if (!activity) {
           if (speedVal >= 15.0) activity = 'in_vehicle';
           else if (speedVal >= 5.0) activity = 'on_bicycle';
