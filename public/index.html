@@ -1194,7 +1194,7 @@
       <!-- Map Floating Action Buttons (Top-Right) -->
       <div class="map-controls-top-right">
         <button class="map-ctrl-btn" onclick="toggleTileLayer()">
-          <span id="layer-btn-icon">🗺️</span> <span id="layer-btn-text">Voyager</span>
+          <span id="layer-btn-icon">🗺️</span> <span id="layer-btn-text">OpenStreetMap</span>
         </button>
         <button class="map-ctrl-btn" onclick="fitActiveViewBounds()">
           <span>🎯</span> Focus / Overview
@@ -1315,31 +1315,43 @@
     let playbackRate = 1; // 1x, 2x, 5x, 10x
     let isPlaying = false;
 
-    // Tile Layer Configuration (Unblocked Global CDNs)
+    // Tile Layer Configuration (100% Free, Unblocked, No API Keys, No Watermarks)
     const TILE_PROVIDERS = [
       {
-        id: 'voyager',
-        name: 'Voyager',
+        id: 'osm_hot',
+        name: 'OpenStreetMap',
         icon: '🗺️',
-        url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-        subdomains: ['a', 'b', 'c', 'd'],
-        maxZoom: 20
+        url: 'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
+        subdomains: ['a', 'b'],
+        maxZoom: 19,
+        attribution: '© OpenStreetMap contributors, Tiles style by Humanitarian OpenStreetMap Team hosted by OpenStreetMap France'
       },
       {
-        id: 'dark',
-        name: 'Dark Glow',
-        icon: '🌙',
-        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-        subdomains: ['a', 'b', 'c', 'd'],
-        maxZoom: 20
-      },
-      {
-        id: 'esri',
-        name: 'Streets',
+        id: 'esri_streets',
+        name: 'Esri Streets',
         icon: '🏙️',
         url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
         subdomains: [],
-        maxZoom: 19
+        maxZoom: 19,
+        attribution: '© Esri, HERE, Garmin, USGS, NGA'
+      },
+      {
+        id: 'esri_satellite',
+        name: 'Satellite',
+        icon: '🛰️',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        subdomains: [],
+        maxZoom: 19,
+        attribution: '© Esri, Maxar, Earthstar Geographics'
+      },
+      {
+        id: 'esri_dark',
+        name: 'Dark Gray',
+        icon: '🌙',
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        subdomains: [],
+        maxZoom: 16,
+        attribution: '© Esri, HERE, Garmin'
       }
     ];
     let currentTileIndex = 0;
@@ -1383,7 +1395,7 @@
 
       L.control.zoom({ position: 'bottomright' }).addTo(map);
 
-      // Load initial unblocked CARTO Voyager tile layer
+      // Load initial unblocked OpenStreetMap layer
       applyTileLayer(TILE_PROVIDERS[0]);
 
       // Feature group for history trails
@@ -1397,7 +1409,7 @@
       activeTileLayer = L.tileLayer(provider.url, {
         subdomains: provider.subdomains,
         maxZoom: provider.maxZoom,
-        attribution: '© CARTO, © OpenStreetMap contributors'
+        attribution: provider.attribution
       }).addTo(map);
 
       document.getElementById('layer-btn-icon').innerText = provider.icon;
