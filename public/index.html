@@ -1552,7 +1552,7 @@
       renderChildCards();
       renderLiveMarkers();
 
-      if (!activeChildId && childrenData.length > 0) {
+      if ((!activeChildId || !childrenData.some(c => c.id === activeChildId)) && childrenData.length > 0) {
         activeChildId = childrenData[0].id;
         const first = childrenData[0];
         if (first.lastLocation?.lat) {
@@ -1769,20 +1769,37 @@
     function renderLiveMarkers() {
       if (dashboardMode !== 'live') return;
 
+      const validChildIds = new Set(childrenData.map(c => c.id));
+
+      // 1. Remove any markers for children that no longer exist
+      for (const [id, marker] of Object.entries(liveMarkers)) {
+        if (!validChildIds.has(id)) {
+          if (marker && map.hasLayer(marker)) {
+            map.removeLayer(marker);
+          }
+          delete liveMarkers[id];
+        }
+      }
+
+      // 2. Render or update markers for current children with valid locations
       childrenData.forEach(child => {
-        if (child.lastLocation?.lat) {
+        if (child.lastLocation?.lat != null && child.lastLocation?.lng != null) {
           updateLiveMarker(child.id, child.name, child.lastLocation.lat, child.lastLocation.lng, child.avatar_color);
+        } else if (liveMarkers[child.id]) {
+          map.removeLayer(liveMarkers[child.id]);
+          delete liveMarkers[child.id];
         }
       });
     }
 
     function updateLiveMarker(childId, name, lat, lng, color = '#6C63FF') {
+      const initial = (name ? name.trim()[0] : '?').toUpperCase();
       const customIcon = L.divIcon({
         className: 'leaflet-live-pin',
         html: `
           <div class="pin-bubble" style="background: ${color}">
             <div class="pin-pulse" style="border-color: ${color}"></div>
-            ${name ? name[0].toUpperCase() : '?'}
+            ${initial}
           </div>
         `,
         iconSize: [46, 46],
@@ -1791,6 +1808,10 @@
 
       if (liveMarkers[childId]) {
         liveMarkers[childId].setLatLng([lat, lng]);
+        liveMarkers[childId].setIcon(customIcon);
+        if (!map.hasLayer(liveMarkers[childId])) {
+          liveMarkers[childId].addTo(map);
+        }
       } else {
         liveMarkers[childId] = L.marker([lat, lng], { icon: customIcon }).addTo(map);
       }
@@ -1854,15 +1875,16 @@
 
       if (mode === 'live') {
         clearHistoryLayers();
-        // Restore live markers
-        Object.values(liveMarkers).forEach(m => m.addTo(map));
+        renderLiveMarkers();
         const child = childrenData.find(c => c.id === activeChildId);
         if (child?.lastLocation?.lat) {
           map.setView([child.lastLocation.lat, child.lastLocation.lng], 16);
         }
       } else {
         // Remove live markers from map during history view
-        Object.values(liveMarkers).forEach(m => map.removeLayer(m));
+        Object.values(liveMarkers).forEach(m => {
+          if (map.hasLayer(m)) map.removeLayer(m);
+        });
         if (activeChildId) {
           const child = childrenData.find(c => c.id === activeChildId);
           document.getElementById('history-child-name').innerText = (child ? child.name : 'Child') + ' History';
