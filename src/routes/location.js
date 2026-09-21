@@ -175,6 +175,13 @@ router.post('/batch', requireDeviceAuth, async (req, res, next) => {
       return res.status(200).json({ saved: 0, status: 'ignored_low_accuracy' });
     }
 
+    // Sanitize impossible speed spikes (> 150 km/h or 42 m/s)
+    for (const p of validPoints) {
+      if (p.speed != null && (p.speed > 42.0 || p.speed < 0)) {
+        p.speed = 0.0;
+      }
+    }
+
     // 1. REAL-TIME BROADCAST: Broadcast latest point to parent IMMEDIATELY (zero delay, 100% frequency)
     const latest = validPoints.reduce((a, b) =>
       new Date(a.recordedAt) > new Date(b.recordedAt) ? a : b,
@@ -303,7 +310,7 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
       batteryLevel: batteryLevel != null ? Number(batteryLevel) : undefined,
       isCharging: isCharging != null ? Boolean(isCharging) : undefined,
       speed: (speed !== undefined && speed !== null) ? Number(speed) : undefined,
-      activityType: activityType || undefined,
+      activityType: activityType || 'still',
       heading: (heading !== undefined && heading !== null) ? Number(heading) : undefined,
       isOnline: true,
       lastSeen: new Date().toISOString(),

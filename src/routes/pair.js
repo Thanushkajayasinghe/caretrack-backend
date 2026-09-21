@@ -11,6 +11,8 @@ import {
 import { requireParentAuth } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { getIO } from '../sockets/index.js';
+import { clearCachedTrail } from '../services/locationCache.js';
+import bcrypt from 'bcryptjs';
 
 const router = express.Router();
 
@@ -208,6 +210,12 @@ router.post('/claim', async (req, res, next) => {
       await redis.del(`pair:code:${otp}`);
     }
 
+    // Clear stale location cache for this child so the parent app doesn't
+    // show a stale activityType (e.g. 'in_vehicle') from the previous session.
+    const latestKey = `child:latest:${session.childId}`;
+    await redis.del(latestKey).catch(() => {});
+    await clearCachedTrail(session.childId);
+
     // Notify parent in real-time
     const io = getIO();
     io.to(`parent:${session.parentId}`).emit('child_paired', {
@@ -249,6 +257,63 @@ router.get('/status/:sessionId', requireParentAuth, async (req, res, next) => {
       claimedAt: session.claimed_at,
     });
   } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/pair/verify-parent-password ────────────────────────────────────
+// Child device requests Parent verification to unlock or reset Master PIN
+const verifyParentPasswordSchema = z.object({
+  deviceToken: z.string().min(10).optional(),
+  parentEmail: z.string().email().optional(),
+  password: z.string().min(1),
+});
+
+router.post('/verify-parent-password', async (req, res, next) => {
+  try {
+    const { deviceToken, parentEmail, password } = verifyParentPasswordSchema.parse(req.body);
+
+    let parent = null;
+
+    if (deviceToken) {
+      const tokenHash = hashDeviceToken(deviceToken);
+      const record = await db('child_devices')
+        .join('children', 'children.id', 'child_devices.child_id')
+        .join('parents', 'parents.id', 'children.parent_id')
+        .where('child_devices.device_token_hash', tokenHash)
+        .select('parents.id', 'parents.email', 'parents.password_hash')
+        .first();
+
+      if (record) {
+        parent = record;
+      }
+    }
+
+    if (!parent && parentEmail) {
+      parent = await db('parents')
+        .whereRaw('LOWER(TRIM(email)) = ?', [parentEmail.trim().toLowerCase()])
+        .select('id', 'email', 'password_hash')
+        .first();
+    }
+
+    if (!parent) {
+      throw new AppError('Parent account not found', 404);
+    }
+
+    const isValid = await bcrypt.compare(password, parent.password_hash);
+    if (!isValid) {
+      throw new AppError('Incorrect parent account password', 401);
+    }
+
+    res.json({
+      success: true,
+      message: 'Parent authenticated successfully',
+      parentEmail: parent.email,
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: err.issues.map((i) => i.message).join(', ') });
+    }
     next(err);
   }
 });

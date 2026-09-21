@@ -210,5 +210,77 @@ router.put('/:id/settings', requireParentAuth, async (req, res, next) => {
   }
 });
 
+// ── PUT /api/children/:id/avatar ──────────────────────────────────────────────
+// Parent updates avatar photo (base64 data URI or image URL) for a specific child
+router.put('/:id/avatar', requireParentAuth, async (req, res, next) => {
+  try {
+    const child = await db('children')
+      .where({ id: req.params.id, parent_id: req.parent.id })
+      .first();
+    if (!child) throw new AppError('Child not found', 404);
+
+    const { avatarUrl } = req.body;
+    if (!avatarUrl || typeof avatarUrl !== 'string') {
+      return res.status(400).json({ error: 'Valid avatarUrl string is required' });
+    }
+
+    await db('children')
+      .where({ id: req.params.id })
+      .update({ avatar_url: avatarUrl, updated_at: new Date() });
+
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`parent:${req.parent.id}`).emit('child:updated', {
+          childId: req.params.id,
+          avatarUrl,
+        });
+      }
+    } catch (_e) {}
+
+    res.json({ ok: true, avatarUrl });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── POST /api/children/:id/tamper-pin ─────────────────────────────────────────
+// Parent remotely updates or resets Master Tamper PIN for child device
+const tamperPinSchema = z.object({
+  pin: z.string().min(4).max(6).regex(/^\d+$/, 'PIN must be 4-6 digits'),
+});
+
+router.post('/:id/tamper-pin', requireParentAuth, async (req, res, next) => {
+  try {
+    const child = await db('children')
+      .where({ id: req.params.id, parent_id: req.parent.id })
+      .first();
+    if (!child) throw new AppError('Child not found', 404);
+
+    const { pin } = tamperPinSchema.parse(req.body);
+
+    // Broadcast new PIN in real time to child device room and parent room
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`child:${req.params.id}`).emit('tamper_pin_updated', {
+          childId: req.params.id,
+          pin,
+        });
+        io.to(`parent:${req.parent.id}`).emit('child:pin_updated', {
+          childId: req.params.id,
+        });
+      }
+    } catch (_e) {}
+
+    res.json({ ok: true, message: 'Tamper PIN updated and pushed to child device' });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: err.issues.map((i) => i.message).join(', ') });
+    }
+    next(err);
+  }
+});
+
 export default router;
 

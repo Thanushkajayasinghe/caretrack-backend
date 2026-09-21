@@ -54,6 +54,12 @@ export async function runMigrations() {
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_children_parent ON children(parent_id)`);
 
+    await client.query(`
+      ALTER TABLE children
+      ADD COLUMN IF NOT EXISTS avatar_url TEXT,
+      ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()
+    `);
+
     // ── Child devices (hardware-bound) ────────────────────────────────────────
     await client.query(`
       CREATE TABLE IF NOT EXISTS child_devices (
