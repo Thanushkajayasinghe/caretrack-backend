@@ -371,8 +371,10 @@ router.get('/google/callback', (req, res) => {
 
   <script>
     (function() {
-      var hash = (window.location.hash || '').replace(/^#/, '');
-      var search = (window.location.search || '').replace(/^\?/, '');
+      var rawHash = window.location.hash || '';
+      var rawSearch = window.location.search || '';
+      var hash = rawHash.indexOf('#') === 0 ? rawHash.substring(1) : rawHash;
+      var search = rawSearch.indexOf('?') === 0 ? rawSearch.substring(1) : rawSearch;
       var combined = (hash ? hash + '&' : '') + search;
       var params = new URLSearchParams(combined);
       
@@ -389,14 +391,20 @@ router.get('/google/callback', (req, res) => {
       var launchBtn = document.getElementById('launchBtn');
       if (launchBtn) {
         launchBtn.href = target;
+        launchBtn.onclick = function() {
+          window.location.href = target;
+        };
       }
 
       // Android Intent format fallback for Expo Go
       var intentBtn = document.getElementById('intentBtn');
-      if (intentBtn && target.indexOf('exp://') !== -1) {
-        var cleanTarget = target.replace(/^exp:\/\//, '');
+      if (intentBtn) {
+        var cleanTarget = target.indexOf('exp://') === 0 ? target.substring(6) : target;
         var intentUrl = 'intent://' + cleanTarget + '#Intent;scheme=exp;package=host.exp.exponent;end';
         intentBtn.href = intentUrl;
+        intentBtn.onclick = function() {
+          window.location.href = intentUrl;
+        };
         intentBtn.style.display = 'block';
       }
 
