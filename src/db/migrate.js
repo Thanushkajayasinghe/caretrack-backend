@@ -18,13 +18,28 @@ export async function runMigrations() {
       CREATE TABLE IF NOT EXISTS parents (
         id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         email       VARCHAR(255) UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
+        password_hash TEXT,
         name        VARCHAR(100),
         phone       VARCHAR(30),
         avatar_url  TEXT,
+        google_id   VARCHAR(255),
+        auth_provider VARCHAR(20) DEFAULT 'local',
         created_at  TIMESTAMPTZ DEFAULT NOW(),
         updated_at  TIMESTAMPTZ DEFAULT NOW()
       )
+    `);
+
+    await client.query(`
+      ALTER TABLE parents
+      ALTER COLUMN password_hash DROP NOT NULL,
+      ADD COLUMN IF NOT EXISTS google_id VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS auth_provider VARCHAR(20) DEFAULT 'local';
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_parents_google_id
+      ON parents(google_id)
+      WHERE google_id IS NOT NULL;
     `);
 
     // ── Refresh tokens ───────────────────────────────────────────────────────

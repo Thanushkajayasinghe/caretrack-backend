@@ -300,6 +300,10 @@ router.post('/verify-parent-password', async (req, res, next) => {
       throw new AppError('Parent account not found', 404);
     }
 
+    if (!parent.password_hash) {
+      throw new AppError('This account was registered using Google Sign-In without a local password. Please update your password in the parent app first.', 400);
+    }
+
     const isValid = await bcrypt.compare(password, parent.password_hash);
     if (!isValid) {
       throw new AppError('Incorrect parent account password', 401);
