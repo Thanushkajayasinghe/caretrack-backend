@@ -300,7 +300,7 @@ router.get('/google/callback', (req, res) => {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      height: 100vh;
+      min-height: 100vh;
       margin: 0;
       text-align: center;
       padding: 24px;
@@ -317,29 +317,64 @@ router.get('/google/callback', (req, res) => {
     }
     @keyframes spin { to { transform: rotate(360deg); } }
     h2 { font-size: 20px; font-weight: 700; margin: 0 0 8px 0; color: #F3F4F6; }
-    p { font-size: 14px; color: #9CA3AF; margin: 0; }
+    p { font-size: 14px; color: #9CA3AF; margin: 0 0 20px 0; max-width: 320px; line-height: 1.5; }
+    .btn {
+      display: inline-block;
+      background-color: #2563EB;
+      color: #FFFFFF;
+      font-weight: 600;
+      font-size: 15px;
+      padding: 12px 28px;
+      border-radius: 10px;
+      text-decoration: none;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+      transition: background-color 0.2s;
+    }
+    .btn:active { background-color: #1D4ED8; }
   </style>
 </head>
 <body>
   <div class="spinner"></div>
   <h2>Signing you into CareTrack...</h2>
-  <p>Returning to CareTrack Parent</p>
+  <p id="statusText">Returning to CareTrack Parent</p>
+  <a id="launchBtn" href="#" class="btn" style="display:none;">Open CareTrack Parent</a>
+
   <script>
     (function() {
-      var search = window.location.search || '';
-      var hash = window.location.hash || '';
-      var params = new URLSearchParams(search);
+      var hash = (window.location.hash || '').replace(/^#/, '');
+      var search = (window.location.search || '').replace(/^\?/, '');
+      var combined = (hash ? hash + '&' : '') + search;
+      var params = new URLSearchParams(combined);
+      
       var state = params.get('state');
-      var returnUrl = state ? decodeURIComponent(state) : 'caretrack-parent://oauthredirect';
+      var returnUrl = state ? decodeURIComponent(state) : 'caretrack-parent://google-auth-callback';
       
       var target = returnUrl;
       if (hash) {
-        target += (target.indexOf('#') !== -1 ? '&' : '#') + hash.replace(/^#/, '');
+        target += (target.indexOf('#') !== -1 ? '&' : '#') + hash;
       } else if (search) {
-        target += (target.indexOf('?') !== -1 ? '&' : '?') + search.replace(/^\?/, '');
+        target += (target.indexOf('?') !== -1 ? '&' : '?') + search;
       }
       
-      window.location.replace(target);
+      var launchBtn = document.getElementById('launchBtn');
+      var statusText = document.getElementById('statusText');
+      if (launchBtn) {
+        launchBtn.href = target;
+      }
+
+      // 1. Attempt automatic navigation
+      try {
+        window.location.href = target;
+      } catch (_e) {}
+
+      // 2. Fallback: if browser blocks automatic intent navigation (Brave/Chrome restrictions),
+      // show the button immediately so a single tap opens the app
+      setTimeout(function() {
+        if (launchBtn) {
+          launchBtn.style.display = 'inline-block';
+          if (statusText) statusText.innerText = 'Tap below to return to the CareTrack app:';
+        }
+      }, 350);
     })();
   </script>
 </body>
