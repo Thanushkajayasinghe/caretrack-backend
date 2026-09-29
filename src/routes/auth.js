@@ -290,8 +290,9 @@ router.get('/google/callback', (req, res) => {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>CareTrack Authentication</title>
+  <title>CareTrack Sign-In</title>
   <style>
+    * { box-sizing: border-box; }
     body {
       background-color: #070A13;
       color: #FFFFFF;
@@ -304,40 +305,69 @@ router.get('/google/callback', (req, res) => {
       margin: 0;
       text-align: center;
       padding: 24px;
-      box-sizing: border-box;
     }
-    .spinner {
-      width: 44px;
-      height: 44px;
-      border: 3px solid rgba(255,255,255,0.1);
-      border-top-color: #3B82F6;
+    .card {
+      background: #111827;
+      border: 1px solid #1F2937;
+      border-radius: 20px;
+      padding: 32px 24px;
+      max-width: 380px;
+      width: 100%;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .icon {
+      width: 60px;
+      height: 60px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 2px solid #10B981;
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px auto;
+      font-size: 28px;
+      color: #10B981;
     }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    h2 { font-size: 20px; font-weight: 700; margin: 0 0 8px 0; color: #F3F4F6; }
-    p { font-size: 14px; color: #9CA3AF; margin: 0 0 20px 0; max-width: 320px; line-height: 1.5; }
+    h2 { font-size: 22px; font-weight: 700; margin: 0 0 10px 0; color: #F9FAFB; }
+    p { font-size: 15px; color: #9CA3AF; margin: 0 0 28px 0; line-height: 1.5; }
     .btn {
-      display: inline-block;
-      background-color: #2563EB;
+      display: block;
+      width: 100%;
+      background: #2563EB;
       color: #FFFFFF;
-      font-weight: 600;
-      font-size: 15px;
-      padding: 12px 28px;
-      border-radius: 10px;
+      font-weight: 700;
+      font-size: 16px;
+      padding: 16px 20px;
+      border-radius: 12px;
       text-decoration: none;
-      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
-      transition: background-color 0.2s;
+      box-shadow: 0 4px 15px rgba(37, 99, 235, 0.4);
+      transition: transform 0.1s, background-color 0.2s;
     }
-    .btn:active { background-color: #1D4ED8; }
+    .btn:active {
+      transform: scale(0.98);
+      background: #1D4ED8;
+    }
+    .secondary-btn {
+      display: block;
+      width: 100%;
+      margin-top: 14px;
+      background: transparent;
+      color: #93C5FD;
+      font-size: 14px;
+      font-weight: 500;
+      text-decoration: none;
+      padding: 8px;
+    }
   </style>
 </head>
 <body>
-  <div class="spinner"></div>
-  <h2>Signing you into CareTrack...</h2>
-  <p id="statusText">Returning to CareTrack Parent</p>
-  <a id="launchBtn" href="#" class="btn" style="display:none;">Open CareTrack Parent</a>
+  <div class="card">
+    <div class="icon">✓</div>
+    <h2>Google Verified!</h2>
+    <p>Tap the button below to return to the CareTrack app and complete sign-in.</p>
+    <a id="launchBtn" href="#" class="btn">👉 Return to CareTrack</a>
+    <a id="intentBtn" href="#" class="secondary-btn" style="display:none;">Open with Expo Go directly</a>
+  </div>
 
   <script>
     (function() {
@@ -347,7 +377,7 @@ router.get('/google/callback', (req, res) => {
       var params = new URLSearchParams(combined);
       
       var state = params.get('state');
-      var returnUrl = state ? decodeURIComponent(state) : 'caretrack-parent://google-auth-callback';
+      var returnUrl = state ? decodeURIComponent(state) : 'exp://pmeyjfa-tjayasinghe-8081.exp.direct/--/google-auth-callback';
       
       var target = returnUrl;
       if (hash) {
@@ -357,24 +387,23 @@ router.get('/google/callback', (req, res) => {
       }
       
       var launchBtn = document.getElementById('launchBtn');
-      var statusText = document.getElementById('statusText');
       if (launchBtn) {
         launchBtn.href = target;
       }
 
-      // 1. Attempt automatic navigation
+      // Android Intent format fallback for Expo Go
+      var intentBtn = document.getElementById('intentBtn');
+      if (intentBtn && target.indexOf('exp://') !== -1) {
+        var cleanTarget = target.replace(/^exp:\/\//, '');
+        var intentUrl = 'intent://' + cleanTarget + '#Intent;scheme=exp;package=host.exp.exponent;end';
+        intentBtn.href = intentUrl;
+        intentBtn.style.display = 'block';
+      }
+
+      // Automatic redirect attempt
       try {
         window.location.href = target;
       } catch (_e) {}
-
-      // 2. Fallback: if browser blocks automatic intent navigation (Brave/Chrome restrictions),
-      // show the button immediately so a single tap opens the app
-      setTimeout(function() {
-        if (launchBtn) {
-          launchBtn.style.display = 'inline-block';
-          if (statusText) statusText.innerText = 'Tap below to return to the CareTrack app:';
-        }
-      }, 350);
     })();
   </script>
 </body>
