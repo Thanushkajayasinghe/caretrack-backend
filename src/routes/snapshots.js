@@ -54,7 +54,6 @@ export function queueSnapshotCommand(childId, command = {}) {
       } catch (_e) {}
     }
     pollWaiters.delete(childId);
-    pendingSnapshots.delete(childId); // Consumed by the device
     console.log(`⚡ Snapshot command dispatched immediately to long-poll waiter for child ${childId}`);
   }
 
@@ -68,7 +67,6 @@ router.get('/poll-command', requireDeviceAuth, (req, res) => {
   // Check if a pending command already exists
   const pending = pendingSnapshots.get(childId);
   if (pending && Date.now() - pending.createdAt < 60000) {
-    pendingSnapshots.delete(childId);
     return res.json({ hasCommand: true, command: pending });
   }
 
@@ -230,6 +228,9 @@ router.post('/upload', requireDeviceAuth, async (req, res, next) => {
         is_viewed: false,
       })
       .returning('*');
+
+    // Command fulfilled: clear from pending queue
+    pendingSnapshots.delete(childId);
 
     // Notify connected parent via Socket.IO
     try {
