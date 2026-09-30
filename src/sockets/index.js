@@ -74,6 +74,35 @@ export function initSocket(httpServer) {
       socket.join(`parent:${socket.parentId}`);
       console.log(`👤 Parent ${socket.parentId} connected`);
 
+      socket.on('snapshot:request', async (data) => {
+        try {
+          const { childId, mediaType = 'audio', options = { durationSeconds: 20 } } = data || {};
+          if (!childId) return;
+
+          const child = await db('children')
+            .where({ id: childId, parent_id: socket.parentId })
+            .first();
+
+          if (!child) {
+            socket.emit('snapshot:error', { error: 'Child not found or unauthorized' });
+            return;
+          }
+
+          const requestId = data.requestId || `req_${Date.now()}`;
+          console.log(`🎙️ Parent ${socket.parentId} requested ${mediaType} snapshot for child ${childId}`);
+
+          io.to(`child:${childId}`).emit('snapshot:request', {
+            requestId,
+            childId,
+            mediaType,
+            options,
+          });
+        } catch (err) {
+          console.error('snapshot:request error:', err.message);
+          socket.emit('snapshot:error', { error: 'Failed to request snapshot' });
+        }
+      });
+
       socket.on('disconnect', () => {
         console.log(`👤 Parent ${socket.parentId} disconnected`);
       });

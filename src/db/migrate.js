@@ -133,6 +133,27 @@ export async function runMigrations() {
     await client.query(`CREATE INDEX IF NOT EXISTS idx_locations_child_time ON locations(child_id, recorded_at DESC)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_locations_geom ON locations USING GIST(location)`);
 
+    // ── Media Snapshots (Audio, Screenshot, Camera) ──────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS media_snapshots (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        child_id         UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+        parent_id        UUID NOT NULL REFERENCES parents(id) ON DELETE CASCADE,
+        media_type       VARCHAR(20) NOT NULL,
+        file_name        VARCHAR(255) NOT NULL,
+        mime_type        VARCHAR(50) NOT NULL,
+        file_size_bytes  INT,
+        duration_seconds INT,
+        camera_facing    VARCHAR(10),
+        latitude         FLOAT,
+        longitude        FLOAT,
+        is_viewed        BOOLEAN DEFAULT FALSE,
+        recorded_at      TIMESTAMPTZ DEFAULT NOW(),
+        created_at       TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_media_snapshots_child_type ON media_snapshots(child_id, media_type, recorded_at DESC)`);
+
     await client.query('COMMIT');
     console.log('✅ Database migrations completed');
   } catch (err) {
