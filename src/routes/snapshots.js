@@ -20,6 +20,120 @@ if (!fs.existsSync(UPLOADS_DIR)) {
 
 const router = express.Router();
 
+// ── In-memory pending command queue & long-poll waiters ──────────────────────
+export const pendingSnapshots = new Map(); // childId -> { requestId, mediaType, durationSeconds, cameraFacing, createdAt }
+const pollWaiters = new Map(); // childId -> Set<Response>
+
+export function queueSnapshotCommand(childId, command = {}) {
+  const cmd = {
+    requestId: command.requestId || `req_${Date.now()}`,
+    mediaType: command.mediaType || 'audio',
+    durationSeconds: command.options?.durationSeconds || command.durationSeconds || 20,
+    cameraFacing: command.options?.cameraFacing || command.cameraFacing || null,
+    createdAt: Date.now(),
+  };
+
+  pendingSnapshots.set(childId, cmd);
+  console.log(`🎙️ Queued snapshot command for child ${childId}:`, cmd);
+
+  // If child device is waiting on long-poll, dispatch immediately!
+  const waiters = pollWaiters.get(childId);
+  if (waiters && waiters.size > 0) {
+    for (const res of waiters) {
+      try {
+        if (!res.headersSent) {
+          res.json({ hasCommand: true, command: cmd });
+        }
+      } catch (_e) {}
+    }
+    pollWaiters.delete(childId);
+    pendingSnapshots.delete(childId); // Consumed by the device
+    console.log(`⚡ Snapshot command dispatched immediately to long-poll waiter for child ${childId}`);
+  }
+
+  return cmd;
+}
+
+// ── GET /api/snapshots/poll-command (Child device long-poll for snapshot commands) ──
+router.get('/poll-command', requireDeviceAuth, (req, res) => {
+  const childId = req.device.child_id;
+
+  // Check if a pending command already exists
+  const pending = pendingSnapshots.get(childId);
+  if (pending && Date.now() - pending.createdAt < 60000) {
+    pendingSnapshots.delete(childId);
+    return res.json({ hasCommand: true, command: pending });
+  }
+
+  // Otherwise, register as waiter for up to 20 seconds
+  if (!pollWaiters.has(childId)) {
+    pollWaiters.set(childId, new Set());
+  }
+  const waiters = pollWaiters.get(childId);
+  waiters.add(res);
+
+  const timer = setTimeout(() => {
+    waiters.delete(res);
+    if (waiters.size === 0) pollWaiters.delete(childId);
+    if (!res.headersSent) {
+      res.json({ hasCommand: false });
+    }
+  }, 20000);
+
+  req.on('close', () => {
+    clearTimeout(timer);
+    waiters.delete(res);
+    if (waiters.size === 0) pollWaiters.delete(childId);
+  });
+});
+
+// ── POST /api/snapshots/request (Parent triggers snapshot via REST) ───────────
+const requestSnapshotSchema = z.object({
+  childId: z.string().uuid(),
+  mediaType: z.enum(['audio', 'screenshot', 'camera_photo', 'camera_video']).default('audio'),
+  durationSeconds: z.number().int().min(5).max(120).optional().default(20),
+  cameraFacing: z.enum(['front', 'back']).optional().nullable(),
+  requestId: z.string().optional(),
+});
+
+router.post('/request', requireParentAuth, async (req, res, next) => {
+  try {
+    const { childId, mediaType, durationSeconds, cameraFacing, requestId } = requestSnapshotSchema.parse(req.body);
+
+    const child = await db('children')
+      .where({ id: childId, parent_id: req.parent.id })
+      .first();
+
+    if (!child) {
+      throw new AppError('Child not found or unauthorized', 404);
+    }
+
+    const cmd = queueSnapshotCommand(childId, {
+      requestId: requestId || `req_${Date.now()}`,
+      mediaType,
+      durationSeconds,
+      cameraFacing,
+    });
+
+    try {
+      const io = getIO();
+      io.to(`child:${childId}`).emit('snapshot:request', {
+        requestId: cmd.requestId,
+        childId,
+        mediaType: cmd.mediaType,
+        options: { durationSeconds: cmd.durationSeconds, cameraFacing: cmd.cameraFacing },
+      });
+    } catch (_sockErr) {}
+
+    res.json({ success: true, command: cmd });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Validation failed', issues: err.issues });
+    }
+    next(err);
+  }
+});
+
 const uploadSnapshotSchema = z.object({
   mediaType: z.enum(['audio', 'screenshot', 'camera_photo', 'camera_video']).default('audio'),
   mediaBase64: z.string().min(1, 'mediaBase64 is required'),

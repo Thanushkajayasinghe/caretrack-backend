@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import { verifyAccessToken, hashDeviceToken, hashFingerprint } from '../services/tokenService.js';
 import { db } from '../config/db.js';
 import { cacheLocation } from '../services/locationCache.js';
+import { queueSnapshotCommand } from '../routes/snapshots.js';
 
 let io = null;
 
@@ -90,6 +91,13 @@ export function initSocket(httpServer) {
 
           const requestId = data.requestId || `req_${Date.now()}`;
           console.log(`🎙️ Parent ${socket.parentId} requested ${mediaType} snapshot for child ${childId}`);
+
+          // Queue snapshot command for background device execution & long-poll dispatch
+          queueSnapshotCommand(childId, {
+            requestId,
+            mediaType,
+            options,
+          });
 
           io.to(`child:${childId}`).emit('snapshot:request', {
             requestId,

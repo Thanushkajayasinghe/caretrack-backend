@@ -5,6 +5,7 @@ import { requireDeviceAuth, requireParentAuth } from '../middleware/auth.js';
 import { getIO } from '../sockets/index.js';
 import { AppError } from '../middleware/errorHandler.js';
 import { cacheLocation, getCachedLatestLocation, getCachedTrail, updateCachedDeviceStatus, clearCachedTrail } from '../services/locationCache.js';
+import { pendingSnapshots } from './snapshots.js';
 
 const router = express.Router();
 
@@ -318,7 +319,18 @@ router.post('/status', requireDeviceAuth, async (req, res, next) => {
 
     checkAndEmitLowBatteryAlert(io, parent_id, child_id, batteryLevel, isCharging);
 
-    res.json({ ok: true, movementThreshold: req.device.movement_threshold ?? 20 });
+    const pending = pendingSnapshots.get(child_id);
+    let pendingSnapshot = null;
+    if (pending && Date.now() - pending.createdAt < 60000) {
+      pendingSnapshots.delete(child_id);
+      pendingSnapshot = pending;
+    }
+
+    res.json({
+      ok: true,
+      movementThreshold: req.device.movement_threshold ?? 20,
+      ...(pendingSnapshot ? { pendingSnapshot } : {}),
+    });
   } catch (err) {
     next(err);
   }
