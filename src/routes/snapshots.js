@@ -73,6 +73,9 @@ export function queueSnapshotCommand(childId, command = {}) {
       } catch (_e) {}
     }
     pollWaiters.delete(childId);
+    if (cmd.mediaType === 'live_listen' || cmd.mediaType === 'live_listen_stop') {
+      pendingSnapshots.delete(childId);
+    }
     console.log(`⚡ Snapshot command dispatched immediately to long-poll waiter for child ${childId}`);
   }
 
@@ -121,10 +124,15 @@ router.post('/live-stream', requireDeviceAuth, (req, res) => {
   } catch (_e) {}
 
   // Stream raw PCM chunks as they arrive over HTTP chunked connection
+  let chunkIndex = 0;
   req.on('data', (chunk) => {
     try {
       const io = getIO();
       const chunkBase64 = chunk.toString('base64');
+      chunkIndex++;
+      if (chunkIndex % 30 === 1) {
+        console.log(`🔊 Relayed PCM chunk #${chunkIndex} (${chunk.length} bytes) to parent ${parentId} for child ${childId}`);
+      }
       io.to(`parent:${parentId}`).emit('live_audio:chunk', {
         childId,
         chunkBase64,
@@ -158,6 +166,9 @@ router.get('/poll-command', requireDeviceAuth, (req, res) => {
   // Check if a pending command already exists
   const pending = pendingSnapshots.get(childId);
   if (pending && Date.now() - pending.createdAt < 60000) {
+    if (pending.mediaType === 'live_listen' || pending.mediaType === 'live_listen_stop') {
+      pendingSnapshots.delete(childId);
+    }
     return res.json({ hasCommand: true, command: pending });
   }
 
