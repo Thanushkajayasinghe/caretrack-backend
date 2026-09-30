@@ -25,6 +25,13 @@ export const pendingSnapshots = new Map(); // childId -> { requestId, mediaType,
 const pollWaiters = new Map(); // childId -> Set<Response>
 
 export function queueSnapshotCommand(childId, command = {}) {
+  // Deduplicate: if a command was queued for this child in the last 15 seconds, return it
+  const existing = pendingSnapshots.get(childId);
+  if (existing && Date.now() - existing.createdAt < 15000) {
+    console.log(`ℹ️ Deduplicated snapshot command for child ${childId} (already pending)`);
+    return existing;
+  }
+
   const cmd = {
     requestId: command.requestId || `req_${Date.now()}`,
     mediaType: command.mediaType || 'audio',
