@@ -364,9 +364,9 @@ router.get('/google/callback', (req, res) => {
   <div class="card">
     <div class="icon">✓</div>
     <h2>Google Verified!</h2>
-    <p>Tap the button below to return to the CareTrack app and complete sign-in.</p>
-    <a id="launchBtn" href="#" class="btn">👉 Return to CareTrack</a>
-    <p style="font-size:13px;color:#9CA3AF;margin-top:16px;line-height:1.4;">Tap the button above, or tap the <strong>✕</strong> in the top-left corner to return to CareTrack.</p>
+    <p>Tap below to return to CareTrack and complete sign-in.</p>
+    <a id="launchBtn" href="#" class="btn">👉 Open CareTrack</a>
+    <p style="font-size:13px;color:#9CA3AF;margin-top:16px;line-height:1.4;">If the app does not appear immediately, tap the button above.</p>
     <p id="debugText" style="font-size:11px;color:#4B5563;margin-top:8px;margin-bottom:0;"></p>
   </div>
 
@@ -388,16 +388,36 @@ router.get('/google/callback', (req, res) => {
       } else if (search) {
         target += (target.indexOf('?') !== -1 ? '&' : '?') + search;
       }
-      
+
+      // Android Chrome Intent syntax to explicitly bring Expo Go / CareTrack to foreground
+      var intentUrl = target;
+      if (target.indexOf('exp://') === 0) {
+        var withoutScheme = target.substring(6);
+        var hostAndPath = withoutScheme.split('?')[0].split('#')[0];
+        var queryAndFragment = '';
+        if (withoutScheme.indexOf('?') !== -1) {
+          queryAndFragment = withoutScheme.substring(withoutScheme.indexOf('?') + 1).split('#')[0];
+        }
+        if (hash) {
+          queryAndFragment = (queryAndFragment ? queryAndFragment + '&' : '') + hash;
+        }
+        intentUrl = 'intent://' + hostAndPath + (queryAndFragment ? '?' + queryAndFragment : '') + '#Intent;scheme=exp;package=host.exp.exponent;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;launchFlags=0x14000000;end';
+      }
+
+      function navigateToApp() {
+        if (intentUrl && intentUrl.indexOf('intent://') === 0) {
+          window.location.href = intentUrl;
+        } else {
+          window.location.href = target;
+        }
+      }
+
       var launchBtn = document.getElementById('launchBtn');
       if (launchBtn) {
-        launchBtn.href = target;
+        launchBtn.href = intentUrl || target;
         launchBtn.onclick = function(e) {
           if (e) e.preventDefault();
-          window.location.href = target;
-          setTimeout(function() {
-            try { window.close(); } catch (_e) {}
-          }, 300);
+          navigateToApp();
         };
       }
 
@@ -405,6 +425,11 @@ router.get('/google/callback', (req, res) => {
       if (debugText) {
         debugText.innerText = 'Ready to return to CareTrack';
       }
+
+      // Attempt automatic foreground switch
+      try {
+        navigateToApp();
+      } catch (_e) {}
     })();
   </script>
 </body>
