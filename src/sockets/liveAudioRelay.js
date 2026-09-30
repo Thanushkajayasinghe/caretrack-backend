@@ -16,7 +16,7 @@ export function initLiveAudioRelay(httpServer) {
   httpServer.on('upgrade', async (req, socket, head) => {
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
-      if (url.pathname !== '/ws/live-audio') {
+      if (url.pathname !== '/ws/live-audio' && url.pathname !== '/api/ws/live-audio') {
         // Let Socket.IO or other upgrade handlers handle this request
         return;
       }
