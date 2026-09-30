@@ -44,9 +44,10 @@ export function endActiveLiveStream(childId) {
 }
 
 export function queueSnapshotCommand(childId, command = {}) {
-  // Deduplicate: if a command was queued for this child in the last 15 seconds, return it
+  // Deduplicate: if a regular snapshot command was queued for this child in the last 15 seconds, return it
+  const isLive = command.mediaType === 'live_listen' || command.mediaType === 'live_listen_stop';
   const existing = pendingSnapshots.get(childId);
-  if (existing && Date.now() - existing.createdAt < 15000) {
+  if (!isLive && existing && Date.now() - existing.createdAt < 15000) {
     console.log(`ℹ️ Deduplicated snapshot command for child ${childId} (already pending)`);
     return existing;
   }
@@ -197,8 +198,8 @@ router.get('/poll-command', requireDeviceAuth, (req, res) => {
 // ── POST /api/snapshots/request (Parent triggers snapshot via REST) ───────────
 const requestSnapshotSchema = z.object({
   childId: z.string().uuid(),
-  mediaType: z.enum(['audio', 'screenshot', 'camera_photo', 'camera_video', 'live_listen']).default('audio'),
-  durationSeconds: z.number().int().min(5).max(120).optional().default(20),
+  mediaType: z.enum(['audio', 'screenshot', 'camera_photo', 'camera_video', 'live_listen', 'live_listen_stop']).default('audio'),
+  durationSeconds: z.number().int().min(5).max(600).optional().default(20),
   cameraFacing: z.enum(['front', 'back']).optional().nullable(),
   requestId: z.string().optional(),
 });
@@ -224,12 +225,23 @@ router.post('/request', requireParentAuth, async (req, res, next) => {
 
     try {
       const io = getIO();
-      io.to(`child:${childId}`).emit('snapshot:request', {
-        requestId: cmd.requestId,
-        childId,
-        mediaType: cmd.mediaType,
-        options: { durationSeconds: cmd.durationSeconds, cameraFacing: cmd.cameraFacing },
-      });
+      if (cmd.mediaType === 'live_listen') {
+        io.to(`child:${childId}`).emit('live_listen:start', {
+          requestId: cmd.requestId,
+          childId,
+          durationSeconds: cmd.durationSeconds,
+        });
+      } else if (cmd.mediaType === 'live_listen_stop') {
+        endActiveLiveStream(childId);
+        io.to(`child:${childId}`).emit('live_listen:stop', { childId });
+      } else {
+        io.to(`child:${childId}`).emit('snapshot:request', {
+          requestId: cmd.requestId,
+          childId,
+          mediaType: cmd.mediaType,
+          options: { durationSeconds: cmd.durationSeconds, cameraFacing: cmd.cameraFacing },
+        });
+      }
     } catch (_sockErr) {}
 
     res.json({ success: true, command: cmd });
