@@ -170,8 +170,8 @@ router.post('/upload', requireDeviceAuth, async (req, res, next) => {
     const parentId = req.device.parent_id;
 
     // Determine extension and MIME type
-    let ext = '.m4a';
-    let mimeType = 'audio/mp4';
+    let ext = '.aac';
+    let mimeType = 'audio/aac';
     if (mediaType === 'screenshot' || mediaType === 'camera_photo') {
       ext = '.jpg';
       mimeType = 'image/jpeg';
