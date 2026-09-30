@@ -180,6 +180,27 @@ router.post('/upload', requireDeviceAuth, async (req, res, next) => {
       mimeType = 'video/mp4';
     }
 
+    // Deduplicate: If an audio snapshot was created for this child in the last 15 seconds, return existing
+    if (mediaType === 'audio') {
+      const fifteenSecondsAgo = new Date(Date.now() - 15000);
+      const existing = await db('media_snapshots')
+        .where({ child_id: childId, media_type: 'audio' })
+        .where('created_at', '>', fifteenSecondsAgo)
+        .orderBy('created_at', 'desc')
+        .first();
+
+      if (existing) {
+        console.log(`ℹ️ Deduplicated snapshot upload for child ${childId} (already uploaded within 15s)`);
+        return res.status(200).json({
+          success: true,
+          snapshot: {
+            ...existing,
+            fileUrl: `/api/snapshots/file/${existing.file_name}`,
+          },
+        });
+      }
+    }
+
     const uniqueId = uuidv4();
     const fileName = `${childId}_${Date.now()}_${uniqueId.slice(0, 8)}${ext}`;
     const filePath = path.join(UPLOADS_DIR, fileName);
@@ -289,12 +310,13 @@ router.get('/file/:fileName', (req, res, next) => {
       return res.status(404).json({ error: 'File not found' });
     }
 
-    // Determine content type
+    // Determine content type accurately for media streaming
     let contentType = 'application/octet-stream';
-    if (safeName.endsWith('.m4a') || safeName.endsWith('.aac')) contentType = 'audio/mp4; codecs="mp4a.40.2"';
+    if (safeName.endsWith('.aac')) contentType = 'audio/aac';
+    else if (safeName.endsWith('.m4a')) contentType = 'audio/mp4';
+    else if (safeName.endsWith('.mp4')) contentType = 'video/mp4';
     else if (safeName.endsWith('.jpg') || safeName.endsWith('.jpeg')) contentType = 'image/jpeg';
     else if (safeName.endsWith('.png')) contentType = 'image/png';
-    else if (safeName.endsWith('.mp4')) contentType = 'video/mp4';
 
     res.setHeader('Content-Type', contentType);
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
