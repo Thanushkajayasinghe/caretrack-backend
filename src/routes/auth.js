@@ -366,8 +366,8 @@ router.get('/google/callback', (req, res) => {
     <h2>Google Verified!</h2>
     <p>Tap the button below to return to the CareTrack app and complete sign-in.</p>
     <a id="launchBtn" href="#" class="btn">👉 Return to CareTrack</a>
-    <a id="intentBtn" href="#" class="secondary-btn" style="display:none;">Tap here if CareTrack did not open</a>
-    <p id="debugText" style="font-size:11px;color:#4B5563;margin-top:16px;margin-bottom:0;"></p>
+    <p style="font-size:13px;color:#9CA3AF;margin-top:16px;line-height:1.4;">Tap the button above, or tap the <strong>✕</strong> in the top-left corner to return to CareTrack.</p>
+    <p id="debugText" style="font-size:11px;color:#4B5563;margin-top:8px;margin-bottom:0;"></p>
   </div>
 
   <script>
@@ -392,15 +392,13 @@ router.get('/google/callback', (req, res) => {
       var launchBtn = document.getElementById('launchBtn');
       if (launchBtn) {
         launchBtn.href = target;
-      }
-
-      // Android Intent format fallback for Expo Go
-      var intentBtn = document.getElementById('intentBtn');
-      if (intentBtn) {
-        var cleanTarget = target.indexOf('exp://') === 0 ? target.substring(6) : target;
-        var intentUrl = 'intent://' + cleanTarget + '#Intent;scheme=exp;package=host.exp.exponent;end';
-        intentBtn.href = intentUrl;
-        intentBtn.style.display = 'block';
+        launchBtn.onclick = function(e) {
+          if (e) e.preventDefault();
+          window.location.href = target;
+          setTimeout(function() {
+            try { window.close(); } catch (_e) {}
+          }, 300);
+        };
       }
 
       var debugText = document.getElementById('debugText');
