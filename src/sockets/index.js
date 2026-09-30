@@ -161,10 +161,11 @@ export function initSocket(httpServer) {
 
           endActiveLiveStream(childId);
 
-          const pending = pendingSnapshots.get(childId);
-          if (pending?.mediaType === 'live_listen') {
-            pendingSnapshots.delete(childId);
-          }
+          pendingSnapshots.delete(childId);
+          queueSnapshotCommand(childId, {
+            requestId: `stop_${Date.now()}`,
+            mediaType: 'live_listen_stop',
+          });
 
           io.to(`child:${childId}`).emit('live_listen:stop', { childId });
           socket.emit('live_listen:status', { status: 'stopped', childId });
