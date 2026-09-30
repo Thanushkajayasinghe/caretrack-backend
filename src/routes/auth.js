@@ -413,6 +413,11 @@ router.get('/google/callback', (req, res) => {
       if (debugText) {
         debugText.innerText = 'Ready to return to CareTrack';
       }
+
+      // Chrome Custom Tabs auto-intercepts returnUrl to close tab seamlessly
+      try {
+        window.location.replace(target);
+      } catch (_e) {}
     })();
   </script>
 </body>
