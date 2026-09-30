@@ -291,12 +291,16 @@ router.get('/file/:fileName', (req, res, next) => {
 
     // Determine content type
     let contentType = 'application/octet-stream';
-    if (safeName.endsWith('.m4a') || safeName.endsWith('.aac')) contentType = 'audio/mp4';
+    if (safeName.endsWith('.m4a') || safeName.endsWith('.aac')) contentType = 'audio/mp4; codecs="mp4a.40.2"';
     else if (safeName.endsWith('.jpg') || safeName.endsWith('.jpeg')) contentType = 'image/jpeg';
     else if (safeName.endsWith('.png')) contentType = 'image/png';
     else if (safeName.endsWith('.mp4')) contentType = 'video/mp4';
 
     res.setHeader('Content-Type', contentType);
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Accept-Ranges', 'bytes');
 
     res.sendFile(filePath, (err) => {

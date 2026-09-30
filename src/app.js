@@ -26,6 +26,7 @@ app.set('trust proxy', 1);
 // ── Security middleware ──────────────────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: false, // allow loading OpenStreetMap tiles and CDNs
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
 }));
 app.use(cors({
   origin: '*',
