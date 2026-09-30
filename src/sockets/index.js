@@ -2,7 +2,7 @@ import { Server } from 'socket.io';
 import { verifyAccessToken, hashDeviceToken, hashFingerprint } from '../services/tokenService.js';
 import { db } from '../config/db.js';
 import { cacheLocation } from '../services/locationCache.js';
-import { queueSnapshotCommand } from '../routes/snapshots.js';
+import { queueSnapshotCommand, endActiveLiveStream, pendingSnapshots, activeLiveStreams } from '../routes/snapshots.js';
 
 let io = null;
 
@@ -111,8 +111,77 @@ export function initSocket(httpServer) {
         }
       });
 
+      socket.on('live_listen:start', async (data) => {
+        try {
+          const { childId } = data || {};
+          if (!childId) return;
+
+          const child = await db('children')
+            .where({ id: childId, parent_id: socket.parentId })
+            .first();
+
+          if (!child) {
+            socket.emit('live_listen:error', { error: 'Child not found or unauthorized' });
+            return;
+          }
+
+          console.log(`🎙️ Parent ${socket.parentId} requested Live Listen on child ${childId}`);
+
+          const requestId = `live_${Date.now()}`;
+          // Queue command so background poller picks it up immediately
+          queueSnapshotCommand(childId, {
+            requestId,
+            mediaType: 'live_listen',
+            durationSeconds: 300,
+          });
+
+          // Also emit to child room directly via socket
+          io.to(`child:${childId}`).emit('live_listen:start', {
+            requestId,
+            childId,
+            parentId: socket.parentId,
+          });
+
+          socket.emit('live_listen:status', {
+            status: 'connecting',
+            childId,
+          });
+        } catch (err) {
+          console.error('live_listen:start error:', err.message);
+          socket.emit('live_listen:error', { error: 'Failed to start live listening' });
+        }
+      });
+
+      socket.on('live_listen:stop', async (data) => {
+        try {
+          const { childId } = data || {};
+          if (!childId) return;
+
+          console.log(`⏹️ Parent ${socket.parentId} stopped Live Listen on child ${childId}`);
+
+          endActiveLiveStream(childId);
+
+          const pending = pendingSnapshots.get(childId);
+          if (pending?.mediaType === 'live_listen') {
+            pendingSnapshots.delete(childId);
+          }
+
+          io.to(`child:${childId}`).emit('live_listen:stop', { childId });
+          socket.emit('live_listen:status', { status: 'stopped', childId });
+        } catch (err) {
+          console.error('live_listen:stop error:', err.message);
+        }
+      });
+
       socket.on('disconnect', () => {
         console.log(`👤 Parent ${socket.parentId} disconnected`);
+        // Clean up any active live streams associated with this parent
+        for (const [cId, active] of activeLiveStreams.entries()) {
+          if (active.parentId === socket.parentId) {
+            endActiveLiveStream(cId);
+            io.to(`child:${cId}`).emit('live_listen:stop', { childId: cId });
+          }
+        }
       });
     }
 
@@ -187,8 +256,19 @@ export function initSocket(httpServer) {
         });
       });
 
+      socket.on('live_audio:chunk', (data) => {
+        if (data?.chunkBase64) {
+          io.to(`parent:${socket.parentId}`).emit('live_audio:chunk', {
+            childId: socket.childId,
+            chunkBase64: data.chunkBase64,
+            timestamp: Date.now(),
+          });
+        }
+      });
+
       socket.on('disconnect', () => {
         console.log(`👶 Child ${socket.childId} socket disconnected`);
+        endActiveLiveStream(socket.childId);
         setTimeout(async () => {
           try {
             const activeSockets = io.sockets.adapter.rooms.get(`child:${socket.childId}`);

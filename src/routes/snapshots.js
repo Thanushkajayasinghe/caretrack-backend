@@ -23,6 +23,25 @@ const router = express.Router();
 // ── In-memory pending command queue & long-poll waiters ──────────────────────
 export const pendingSnapshots = new Map(); // childId -> { requestId, mediaType, durationSeconds, cameraFacing, createdAt }
 const pollWaiters = new Map(); // childId -> Set<Response>
+export const activeLiveStreams = new Map(); // childId -> { res, parentId, startTime, timer }
+
+export function endActiveLiveStream(childId) {
+  const active = activeLiveStreams.get(childId);
+  if (active) {
+    try {
+      if (active.timer) clearTimeout(active.timer);
+      if (!active.res.headersSent) {
+        active.res.status(200).json({ success: true, message: 'Live stream ended' });
+      } else {
+        active.res.end();
+      }
+    } catch (_e) {}
+    activeLiveStreams.delete(childId);
+    console.log(`⏹️ Ended live audio stream for child ${childId}`);
+    return true;
+  }
+  return false;
+}
 
 export function queueSnapshotCommand(childId, command = {}) {
   // Deduplicate: if a command was queued for this child in the last 15 seconds, return it
@@ -60,6 +79,78 @@ export function queueSnapshotCommand(childId, command = {}) {
   return cmd;
 }
 
+// ── POST /api/snapshots/live-stream (Child streams real-time PCM audio chunks) ──
+router.post('/live-stream', requireDeviceAuth, (req, res) => {
+  const childId = req.device.child_id;
+  const parentId = req.device.parent_id;
+
+  console.log(`🔴 Child ${childId} started streaming live audio`);
+
+  // Terminate any previous live stream for this child
+  endActiveLiveStream(childId);
+
+  // Set safety timeout (max 5 minutes)
+  const timer = setTimeout(() => {
+    console.log(`⏰ Max 5-min live stream safety timeout reached for child ${childId}`);
+    endActiveLiveStream(childId);
+    try {
+      const io = getIO();
+      io.to(`parent:${parentId}`).emit('live_listen:status', {
+        status: 'timeout',
+        message: 'Live listening reached the 5-minute safety limit.',
+        childId,
+      });
+    } catch (_e) {}
+  }, 5 * 60 * 1000);
+
+  activeLiveStreams.set(childId, { res, parentId, startTime: Date.now(), timer });
+
+  // Clear live_listen from pending snapshots queue
+  const pending = pendingSnapshots.get(childId);
+  if (pending?.mediaType === 'live_listen') {
+    pendingSnapshots.delete(childId);
+  }
+
+  // Notify parent that live stream is active
+  try {
+    const io = getIO();
+    io.to(`parent:${parentId}`).emit('live_listen:status', {
+      status: 'active',
+      childId,
+    });
+  } catch (_e) {}
+
+  // Stream raw PCM chunks as they arrive over HTTP chunked connection
+  req.on('data', (chunk) => {
+    try {
+      const io = getIO();
+      const chunkBase64 = chunk.toString('base64');
+      io.to(`parent:${parentId}`).emit('live_audio:chunk', {
+        childId,
+        chunkBase64,
+        timestamp: Date.now(),
+      });
+    } catch (_e) {}
+  });
+
+  req.on('end', () => {
+    console.log(`⏹️ Child ${childId} live stream connection ended by client`);
+    endActiveLiveStream(childId);
+    try {
+      const io = getIO();
+      io.to(`parent:${parentId}`).emit('live_listen:status', {
+        status: 'ended',
+        childId,
+      });
+    } catch (_e) {}
+  });
+
+  req.on('error', (err) => {
+    console.warn(`⚠️ Child ${childId} live stream error:`, err.message);
+    endActiveLiveStream(childId);
+  });
+});
+
 // ── GET /api/snapshots/poll-command (Child device long-poll for snapshot commands) ──
 router.get('/poll-command', requireDeviceAuth, (req, res) => {
   const childId = req.device.child_id;
@@ -95,7 +186,7 @@ router.get('/poll-command', requireDeviceAuth, (req, res) => {
 // ── POST /api/snapshots/request (Parent triggers snapshot via REST) ───────────
 const requestSnapshotSchema = z.object({
   childId: z.string().uuid(),
-  mediaType: z.enum(['audio', 'screenshot', 'camera_photo', 'camera_video']).default('audio'),
+  mediaType: z.enum(['audio', 'screenshot', 'camera_photo', 'camera_video', 'live_listen']).default('audio'),
   durationSeconds: z.number().int().min(5).max(120).optional().default(20),
   cameraFacing: z.enum(['front', 'back']).optional().nullable(),
   requestId: z.string().optional(),
