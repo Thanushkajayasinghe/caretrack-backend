@@ -366,7 +366,8 @@ router.get('/google/callback', (req, res) => {
     <h2>Google Verified!</h2>
     <p>Tap the button below to return to the CareTrack app and complete sign-in.</p>
     <a id="launchBtn" href="#" class="btn">👉 Return to CareTrack</a>
-    <a id="intentBtn" href="#" class="secondary-btn" style="display:none;">Open with Expo Go directly</a>
+    <a id="intentBtn" href="#" class="secondary-btn" style="display:none;">Tap here if CareTrack did not open</a>
+    <p id="debugText" style="font-size:11px;color:#4B5563;margin-top:16px;margin-bottom:0;"></p>
   </div>
 
   <script>
@@ -379,7 +380,7 @@ router.get('/google/callback', (req, res) => {
       var params = new URLSearchParams(combined);
       
       var state = params.get('state');
-      var returnUrl = state ? decodeURIComponent(state) : 'exp://pmeyjfa-tjayasinghe-8081.exp.direct/--/google-auth-callback';
+      var returnUrl = state ? decodeURIComponent(state) : 'exp://pmyejfa-tjayasinghe-8081.exp.direct/--/google-auth-callback';
       
       var target = returnUrl;
       if (hash) {
@@ -408,10 +409,10 @@ router.get('/google/callback', (req, res) => {
         intentBtn.style.display = 'block';
       }
 
-      // Automatic redirect attempt
-      try {
-        window.location.href = target;
-      } catch (_e) {}
+      var debugText = document.getElementById('debugText');
+      if (debugText) {
+        debugText.innerText = 'Ready to return to CareTrack';
+      }
     })();
   </script>
 </body>
