@@ -6,6 +6,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import { rateLimit } from 'express-rate-limit';
 import { initSocket } from './sockets/index.js';
+import { initLiveAudioRelay } from './sockets/liveAudioRelay.js';
 import { connectDB } from './config/db.js';
 import { runMigrations } from './db/migrate.js';
 import { connectRedis } from './config/redis.js';
@@ -87,6 +88,7 @@ async function bootstrap() {
   }
   await connectRedis();
   initSocket(httpServer);
+  initLiveAudioRelay(httpServer);
 
   const PORT = process.env.PORT || 3000;
   // Ensure Node.js keepAliveTimeout > Nginx keepalive_timeout (prevents 502/socket hang up on reused sockets)
