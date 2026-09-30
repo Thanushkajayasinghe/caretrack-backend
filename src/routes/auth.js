@@ -392,9 +392,6 @@ router.get('/google/callback', (req, res) => {
       var launchBtn = document.getElementById('launchBtn');
       if (launchBtn) {
         launchBtn.href = target;
-        launchBtn.onclick = function() {
-          window.location.href = target;
-        };
       }
 
       // Android Intent format fallback for Expo Go
@@ -403,9 +400,6 @@ router.get('/google/callback', (req, res) => {
         var cleanTarget = target.indexOf('exp://') === 0 ? target.substring(6) : target;
         var intentUrl = 'intent://' + cleanTarget + '#Intent;scheme=exp;package=host.exp.exponent;end';
         intentBtn.href = intentUrl;
-        intentBtn.onclick = function() {
-          window.location.href = intentUrl;
-        };
         intentBtn.style.display = 'block';
       }
 
@@ -413,11 +407,6 @@ router.get('/google/callback', (req, res) => {
       if (debugText) {
         debugText.innerText = 'Ready to return to CareTrack';
       }
-
-      // Chrome Custom Tabs auto-intercepts returnUrl to close tab seamlessly
-      try {
-        window.location.replace(target);
-      } catch (_e) {}
     })();
   </script>
 </body>
