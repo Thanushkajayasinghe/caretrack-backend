@@ -333,6 +333,7 @@ router.post('/upload', requireDeviceAuth, async (req, res, next) => {
         file_name: fileName,
         mime_type: mimeType,
         file_size_bytes: fileSizeBytes,
+        file_data: buffer,
         duration_seconds: mediaType === 'audio' || mediaType === 'camera_video' ? durationSeconds : null,
         camera_facing: cameraFacing || null,
         latitude: latitude || null,
@@ -341,7 +342,22 @@ router.post('/upload', requireDeviceAuth, async (req, res, next) => {
         created_at: new Date(),
         is_viewed: false,
       })
-      .returning('*');
+      .returning([
+        'id',
+        'child_id',
+        'parent_id',
+        'media_type',
+        'file_name',
+        'mime_type',
+        'file_size_bytes',
+        'duration_seconds',
+        'camera_facing',
+        'latitude',
+        'longitude',
+        'is_viewed',
+        'recorded_at',
+        'created_at',
+      ]);
 
     // Command fulfilled: clear from pending queue
     pendingSnapshots.delete(childId);
@@ -392,6 +408,22 @@ router.get('/child/:childId', requireParentAuth, async (req, res, next) => {
     }
 
     let query = db('media_snapshots')
+      .select([
+        'id',
+        'child_id',
+        'parent_id',
+        'media_type',
+        'file_name',
+        'mime_type',
+        'file_size_bytes',
+        'duration_seconds',
+        'camera_facing',
+        'latitude',
+        'longitude',
+        'is_viewed',
+        'recorded_at',
+        'created_at',
+      ])
       .where({ child_id: childId, parent_id: req.parent.id })
       .orderBy('recorded_at', 'desc')
       .limit(Math.min(Number(limit) || 40, 100))
@@ -413,17 +445,13 @@ router.get('/child/:childId', requireParentAuth, async (req, res, next) => {
   }
 });
 
-// ── GET /api/snapshots/file/:fileName (Serves media file with range streaming) ─
-router.get('/file/:fileName', (req, res, next) => {
+// ── GET /api/snapshots/file/:fileName (Serves media file from disk or persistent PostgreSQL) ─
+router.get('/file/:fileName', async (req, res, next) => {
   try {
     const { fileName } = req.params;
     // Prevent path traversal
     const safeName = path.basename(fileName);
     const filePath = path.join(UPLOADS_DIR, safeName);
-
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'File not found' });
-    }
 
     // Determine content type accurately for media streaming
     let contentType = 'application/octet-stream';
@@ -440,11 +468,32 @@ router.get('/file/:fileName', (req, res, next) => {
     res.setHeader('Access-Control-Allow-Headers', '*');
     res.setHeader('Accept-Ranges', 'bytes');
 
-    res.sendFile(filePath, (err) => {
-      if (err && !res.headersSent) {
-        next(err);
-      }
-    });
+    // 1. If file exists on disk cache, stream it directly
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath, (err) => {
+        if (err && !res.headersSent) {
+          next(err);
+        }
+      });
+    }
+
+    // 2. If not on disk (e.g. Render container restarted), fetch from persistent PostgreSQL BYTEA
+    const snapshot = await db('media_snapshots')
+      .where({ file_name: safeName })
+      .select('file_data', 'mime_type')
+      .first();
+
+    if (!snapshot || !snapshot.file_data) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    // Cache file back to disk asynchronously
+    try {
+      await fs.promises.writeFile(filePath, snapshot.file_data);
+    } catch (_e) {}
+
+    res.setHeader('Content-Length', snapshot.file_data.length);
+    return res.end(snapshot.file_data);
   } catch (err) {
     next(err);
   }

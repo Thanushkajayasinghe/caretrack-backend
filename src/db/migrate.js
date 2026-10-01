@@ -147,11 +147,13 @@ export async function runMigrations() {
         camera_facing    VARCHAR(10),
         latitude         FLOAT,
         longitude        FLOAT,
+        file_data        BYTEA,
         is_viewed        BOOLEAN DEFAULT FALSE,
         recorded_at      TIMESTAMPTZ DEFAULT NOW(),
         created_at       TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+    await client.query(`ALTER TABLE media_snapshots ADD COLUMN IF NOT EXISTS file_data BYTEA;`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_media_snapshots_child_type ON media_snapshots(child_id, media_type, recorded_at DESC)`);
 
     await client.query('COMMIT');
