@@ -104,8 +104,29 @@ export function initLiveAudioRelay(httpServer) {
     }
   });
 
+  // Heartbeat ping interval to keep Render proxy and NAT routers alive
+  const pingInterval = setInterval(() => {
+    wss.clients.forEach((ws) => {
+      if (ws.isAlive === false) {
+        return ws.terminate();
+      }
+      ws.isAlive = false;
+      try {
+        ws.ping();
+      } catch (_e) {}
+    });
+  }, 25000);
+
+  wss.on('close', () => {
+    clearInterval(pingInterval);
+  });
+
   wss.on('connection', (ws, _req, authContext) => {
-    const { role, childId } = authContext;
+    const { role, childId, parentId } = authContext;
+    ws.isAlive = true;
+    ws.on('pong', () => {
+      ws.isAlive = true;
+    });
 
     if (role === 'child') {
       console.log(`🎙️ Child ${childId} connected to Live Audio WebSocket`);
@@ -144,7 +165,9 @@ export function initLiveAudioRelay(httpServer) {
 
       ws.on('close', () => {
         console.log(`⏹️ Child ${childId} disconnected from Live Audio WebSocket`);
-        activeChildStreams.delete(childId);
+        if (activeChildStreams.get(childId) === ws) {
+          activeChildStreams.delete(childId);
+        }
         const currentListeners = activeParentListeners.get(childId);
         if (currentListeners) {
           const msg = JSON.stringify({ type: 'stream_ended', childId });
@@ -159,11 +182,21 @@ export function initLiveAudioRelay(httpServer) {
       });
 
     } else if (role === 'parent') {
-      console.log(`👤 Parent connected to Live Audio WebSocket for child ${childId}`);
+      console.log(`👤 Parent ${parentId} connected to Live Audio WebSocket for child ${childId}`);
       if (!activeParentListeners.has(childId)) {
         activeParentListeners.set(childId, new Set());
       }
       const listeners = activeParentListeners.get(childId);
+
+      // Close and remove any existing connection for this parentId to avoid duplicate audio streams
+      listeners.forEach((existingWs) => {
+        if (existingWs.parentId === parentId && existingWs !== ws) {
+          try { existingWs.close(); } catch (_e) {}
+          listeners.delete(existingWs);
+        }
+      });
+
+      ws.parentId = parentId;
       listeners.add(ws);
 
       // Check if child is already streaming
@@ -173,7 +206,7 @@ export function initLiveAudioRelay(httpServer) {
       }
 
       ws.on('close', () => {
-        console.log(`👤 Parent disconnected from Live Audio WebSocket for child ${childId}`);
+        console.log(`👤 Parent ${parentId} disconnected from Live Audio WebSocket for child ${childId}`);
         listeners.delete(ws);
         if (listeners.size === 0) {
           activeParentListeners.delete(childId);
