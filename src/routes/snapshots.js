@@ -392,6 +392,93 @@ router.post('/upload', requireDeviceAuth, async (req, res, next) => {
   }
 });
 
+const saveLiveSnapshotSchema = z.object({
+  childId: z.string().uuid(),
+  mediaBase64: z.string().min(1, 'mediaBase64 is required'),
+  durationSeconds: z.number().int().min(1).max(600).optional().default(10),
+  recordedAt: z.string().optional(),
+});
+
+// ── POST /api/snapshots/save-live (Parent saves a live audio recording clip) ──
+router.post('/save-live', requireParentAuth, async (req, res, next) => {
+  try {
+    const {
+      childId,
+      mediaBase64,
+      durationSeconds,
+      recordedAt,
+    } = saveLiveSnapshotSchema.parse(req.body);
+
+    const child = await db('children')
+      .where({ id: childId, parent_id: req.parent.id })
+      .first();
+
+    if (!child) {
+      throw new AppError('Child not found or unauthorized', 404);
+    }
+
+    const uniqueId = uuidv4();
+    const fileName = `${childId}_${Date.now()}_live_${uniqueId.slice(0, 8)}.wav`;
+    const filePath = path.join(UPLOADS_DIR, fileName);
+
+    const buffer = Buffer.from(mediaBase64, 'base64');
+    await fs.promises.writeFile(filePath, buffer);
+    const fileSizeBytes = buffer.length;
+
+    const recordTime = recordedAt ? new Date(recordedAt) : new Date();
+
+    const [snapshot] = await db('media_snapshots')
+      .insert({
+        id: uniqueId,
+        child_id: childId,
+        parent_id: req.parent.id,
+        media_type: 'audio',
+        file_name: fileName,
+        mime_type: 'audio/wav',
+        file_size_bytes: fileSizeBytes,
+        file_data: buffer,
+        duration_seconds: durationSeconds,
+        camera_facing: null,
+        latitude: null,
+        longitude: null,
+        recorded_at: recordTime,
+        created_at: new Date(),
+        is_viewed: true,
+      })
+      .returning([
+        'id',
+        'child_id',
+        'parent_id',
+        'media_type',
+        'file_name',
+        'mime_type',
+        'file_size_bytes',
+        'duration_seconds',
+        'camera_facing',
+        'latitude',
+        'longitude',
+        'is_viewed',
+        'recorded_at',
+        'created_at',
+      ]);
+
+    console.log(`💾 Saved live audio recording (${durationSeconds}s, ${fileSizeBytes} bytes) for child ${childId}`);
+
+    res.status(201).json({
+      success: true,
+      snapshot: {
+        ...snapshot,
+        fileUrl: `/api/snapshots/file/${fileName}`,
+      },
+    });
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      return res.status(400).json({ error: 'Validation failed', issues: err.issues });
+    }
+    next(err);
+  }
+});
+
 // ── GET /api/snapshots/child/:childId (Parent queries snapshots list) ─────────
 router.get('/child/:childId', requireParentAuth, async (req, res, next) => {
   try {
@@ -456,6 +543,7 @@ router.get('/file/:fileName', async (req, res, next) => {
     // Determine content type accurately for media streaming
     let contentType = 'application/octet-stream';
     if (safeName.endsWith('.aac')) contentType = 'audio/aac';
+    else if (safeName.endsWith('.wav')) contentType = 'audio/wav';
     else if (safeName.endsWith('.m4a')) contentType = 'audio/mp4';
     else if (safeName.endsWith('.mp4')) contentType = 'video/mp4';
     else if (safeName.endsWith('.jpg') || safeName.endsWith('.jpeg')) contentType = 'image/jpeg';
