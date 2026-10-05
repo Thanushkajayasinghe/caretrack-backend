@@ -402,6 +402,28 @@ router.get('/google/callback', (req, res) => {
           queryAndFragment = (queryAndFragment ? queryAndFragment + '&' : '') + hash;
         }
         intentUrl = 'intent://' + hostAndPath + (queryAndFragment ? '?' + queryAndFragment : '') + '#Intent;scheme=exp;package=host.exp.exponent;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;launchFlags=0x14000000;end';
+      } else if (target.indexOf('caretrack-parent://') === 0) {
+        var withoutScheme = target.substring('caretrack-parent://'.length);
+        var hostAndPath = withoutScheme.split('?')[0].split('#')[0];
+        var queryAndFragment = '';
+        if (withoutScheme.indexOf('?') !== -1) {
+          queryAndFragment = withoutScheme.substring(withoutScheme.indexOf('?') + 1).split('#')[0];
+        }
+        if (hash) {
+          queryAndFragment = (queryAndFragment ? queryAndFragment + '&' : '') + hash;
+        }
+        intentUrl = 'intent://' + hostAndPath + (queryAndFragment ? '?' + queryAndFragment : '') + '#Intent;scheme=caretrack-parent;package=com.caretrack.parent;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;launchFlags=0x14000000;end';
+      } else if (target.indexOf('com.caretrack.parent://') === 0) {
+        var withoutScheme = target.substring('com.caretrack.parent://'.length);
+        var hostAndPath = withoutScheme.split('?')[0].split('#')[0];
+        var queryAndFragment = '';
+        if (withoutScheme.indexOf('?') !== -1) {
+          queryAndFragment = withoutScheme.substring(withoutScheme.indexOf('?') + 1).split('#')[0];
+        }
+        if (hash) {
+          queryAndFragment = (queryAndFragment ? queryAndFragment + '&' : '') + hash;
+        }
+        intentUrl = 'intent://' + hostAndPath + (queryAndFragment ? '?' + queryAndFragment : '') + '#Intent;scheme=com.caretrack.parent;package=com.caretrack.parent;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;launchFlags=0x14000000;end';
       }
 
       function navigateToApp() {
