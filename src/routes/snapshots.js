@@ -74,9 +74,8 @@ export function queueSnapshotCommand(childId, command = {}) {
       } catch (_e) {}
     }
     pollWaiters.delete(childId);
-    if (cmd.mediaType === 'live_listen' || cmd.mediaType === 'live_listen_stop') {
-      pendingSnapshots.delete(childId);
-    }
+    // Delete immediately once dispatched so it never triggers repeatedly
+    pendingSnapshots.delete(childId);
     console.log(`⚡ Snapshot command dispatched immediately to long-poll waiter for child ${childId}`);
   }
 
@@ -167,9 +166,7 @@ router.get('/poll-command', requireDeviceAuth, (req, res) => {
   // Check if a pending command already exists
   const pending = pendingSnapshots.get(childId);
   if (pending && Date.now() - pending.createdAt < 60000) {
-    if (pending.mediaType === 'live_listen' || pending.mediaType === 'live_listen_stop') {
-      pendingSnapshots.delete(childId);
-    }
+    pendingSnapshots.delete(childId); // Clear immediately so it only executes once
     return res.json({ hasCommand: true, command: pending });
   }
 
@@ -292,17 +289,17 @@ router.post('/upload', requireDeviceAuth, async (req, res, next) => {
       mimeType = 'video/mp4';
     }
 
-    // Deduplicate: If an audio snapshot was created for this child in the last 15 seconds, return existing
-    if (mediaType === 'audio') {
-      const fifteenSecondsAgo = new Date(Date.now() - 15000);
+    // Deduplicate: If an audio or screenshot snapshot was created for this child in the last 10 seconds, return existing
+    if (mediaType === 'audio' || mediaType === 'screenshot') {
+      const windowSecondsAgo = new Date(Date.now() - (mediaType === 'screenshot' ? 10000 : 15000));
       const existing = await db('media_snapshots')
-        .where({ child_id: childId, media_type: 'audio' })
-        .where('created_at', '>', fifteenSecondsAgo)
+        .where({ child_id: childId, media_type: mediaType })
+        .where('created_at', '>', windowSecondsAgo)
         .orderBy('created_at', 'desc')
         .first();
 
       if (existing) {
-        console.log(`ℹ️ Deduplicated snapshot upload for child ${childId} (already uploaded within 15s)`);
+        console.log(`ℹ️ Deduplicated ${mediaType} snapshot upload for child ${childId} (already uploaded within recent window)`);
         return res.status(200).json({
           success: true,
           snapshot: {
@@ -388,6 +385,31 @@ router.post('/upload', requireDeviceAuth, async (req, res, next) => {
     if (err instanceof z.ZodError) {
       return res.status(400).json({ error: 'Validation failed', issues: err.issues });
     }
+    next(err);
+  }
+});
+
+// ── POST /api/snapshots/report-error (Child device reports snapshot failure) ──
+router.post('/report-error', requireDeviceAuth, async (req, res, next) => {
+  try {
+    const { requestId, error } = req.body || {};
+    const childId = req.device.child_id;
+    const parentId = req.device.parent_id;
+
+    console.warn(`⚠️ Child device ${childId} reported snapshot error:`, error);
+    pendingSnapshots.delete(childId);
+
+    try {
+      const io = getIO();
+      io.to(`parent:${parentId}`).emit('snapshot:error', {
+        error: error || 'Failed to capture screenshot on device',
+        childId,
+        requestId: requestId || null,
+      });
+    } catch (_sockErr) {}
+
+    res.json({ success: true, message: 'Error logged and parent notified' });
+  } catch (err) {
     next(err);
   }
 });
