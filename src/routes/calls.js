@@ -44,7 +44,7 @@ router.post('/sync', requireDeviceAuth, async (req, res, next) => {
           INSERT INTO call_logs (
             child_id, parent_id, call_type, phone_number, contact_name,
             duration_seconds, timestamp, device_call_id, created_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
           ON CONFLICT (child_id, device_call_id) DO NOTHING
           RETURNING id;
         `;
