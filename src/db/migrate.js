@@ -98,6 +98,7 @@ export async function runMigrations() {
       ADD COLUMN IF NOT EXISTS is_charging BOOLEAN,
       ADD COLUMN IF NOT EXISTS movement_threshold SMALLINT DEFAULT 20
     `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_child_devices_child_active ON child_devices(child_id, is_active, last_seen DESC)`);
 
     // ── Pairing sessions ──────────────────────────────────────────────────────
     await client.query(`
@@ -131,7 +132,10 @@ export async function runMigrations() {
       )
     `);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_locations_child_time ON locations(child_id, recorded_at DESC)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_locations_child_time_asc ON locations(child_id, recorded_at ASC)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_locations_geom ON locations USING GIST(location)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_locations_valid_fixes ON locations(child_id, recorded_at ASC) WHERE (accuracy IS NULL OR accuracy <= 120)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_locations_brin_time ON locations USING BRIN(recorded_at)`);
 
     // ── Media Snapshots (Audio, Screenshot, Camera) ──────────────────────────
     await client.query(`
@@ -154,6 +158,7 @@ export async function runMigrations() {
       )
     `);
     await client.query(`ALTER TABLE media_snapshots ADD COLUMN IF NOT EXISTS file_data BYTEA;`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_media_snapshots_child_time ON media_snapshots(child_id, recorded_at DESC)`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_media_snapshots_child_type ON media_snapshots(child_id, media_type, recorded_at DESC)`);
 
     // ── Call Logs (Incoming, Outgoing, Missed Calls) ─────────────────────────
