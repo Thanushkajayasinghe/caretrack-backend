@@ -15,6 +15,7 @@ import childRouter from './routes/child.js';
 import pairRouter from './routes/pair.js';
 import locationRouter from './routes/location.js';
 import snapshotsRouter from './routes/snapshots.js';
+import callsRouter from './routes/calls.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { setupWebDashboard } from './web/index.js';
 
@@ -67,6 +68,7 @@ app.use('/api/children', childRouter);
 app.use('/api/pair', pairRouter);
 app.use('/api/location', locationRouter);
 app.use('/api/snapshots', snapshotsRouter);
+app.use('/api/calls', callsRouter);
 
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', v: '8dc6f4a', ts: new Date().toISOString() }));

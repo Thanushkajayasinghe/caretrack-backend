@@ -156,6 +156,25 @@ export async function runMigrations() {
     await client.query(`ALTER TABLE media_snapshots ADD COLUMN IF NOT EXISTS file_data BYTEA;`);
     await client.query(`CREATE INDEX IF NOT EXISTS idx_media_snapshots_child_type ON media_snapshots(child_id, media_type, recorded_at DESC)`);
 
+    // ── Call Logs (Incoming, Outgoing, Missed Calls) ─────────────────────────
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS call_logs (
+        id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        child_id         UUID NOT NULL REFERENCES children(id) ON DELETE CASCADE,
+        parent_id        UUID NOT NULL REFERENCES parents(id) ON DELETE CASCADE,
+        call_type        VARCHAR(20) NOT NULL,
+        phone_number     VARCHAR(50) NOT NULL,
+        contact_name     VARCHAR(100),
+        duration_seconds INT NOT NULL DEFAULT 0,
+        timestamp        TIMESTAMPTZ NOT NULL,
+        device_call_id   VARCHAR(50),
+        created_at       TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(child_id, device_call_id)
+      )
+    `);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_call_logs_child_time ON call_logs(child_id, timestamp DESC)`);
+    await client.query(`CREATE INDEX IF NOT EXISTS idx_call_logs_child_type ON call_logs(child_id, call_type, timestamp DESC)`);
+
     await client.query('COMMIT');
     console.log('✅ Database migrations completed');
   } catch (err) {
