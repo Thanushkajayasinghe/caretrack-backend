@@ -9,9 +9,9 @@ import { queueSnapshotCommand } from './snapshots.js';
 const router = express.Router();
 
 const callItemSchema = z.object({
-  deviceCallId: z.string().min(1),
-  phoneNumber: z.string().min(1).max(50),
-  contactName: z.string().max(100).optional().nullable(),
+  deviceCallId: z.string().optional().default('').transform(val => (val && val.trim().length > 0) ? val.trim() : `call_${Date.now()}_${Math.random().toString(36).substring(7)}`),
+  phoneNumber: z.string().optional().default('Unknown').transform(val => (val && val.trim().length > 0) ? val.trim().slice(0, 50) : 'Unknown'),
+  contactName: z.string().optional().nullable().transform(val => (val && val.trim().length > 0) ? val.trim().slice(0, 100) : null),
   callType: z.enum(['incoming', 'outgoing', 'missed', 'rejected', 'blocked', 'voicemail', 'unknown']).default('unknown'),
   durationSeconds: z.number().int().min(0).default(0),
   timestamp: z.string().or(z.number()),
@@ -29,7 +29,7 @@ router.post('/sync', requireDeviceAuth, async (req, res, next) => {
     const parentId = req.device.parent_id;
 
     if (!calls || calls.length === 0) {
-      return res.json({ success: true, inserted: 0 });
+      return res.json({ success: true, count: 0, totalReceived: 0 });
     }
 
     let insertedCount = 0;
@@ -68,20 +68,22 @@ router.post('/sync', requireDeviceAuth, async (req, res, next) => {
       }
     }
 
-    if (insertedCount > 0) {
-      console.log(`📞 Synced ${insertedCount} new call logs for child ${childId}`);
-      try {
-        const io = getIO();
-        io.to(`parent:${parentId}`).emit('calls:updated', {
-          childId,
-          newCount: insertedCount,
-        });
-      } catch (_sockErr) {}
-    }
+    console.log(`📞 Batch processed: ${insertedCount} new calls inserted (${calls.length} received) for child ${childId}`);
+
+    // Always emit calls:updated so the parent app knows the sync roundtrip completed!
+    try {
+      const io = getIO();
+      io.to(`parent:${parentId}`).emit('calls:updated', {
+        childId,
+        newCount: insertedCount,
+        totalReceived: calls.length,
+      });
+    } catch (_sockErr) {}
 
     res.json({ success: true, count: insertedCount, totalReceived: calls.length });
   } catch (err) {
     if (err instanceof z.ZodError) {
+      console.warn('Call sync validation error:', JSON.stringify(err.issues));
       return res.status(400).json({ error: 'Validation failed', issues: err.issues });
     }
     next(err);
